@@ -163,7 +163,7 @@ public:
 
         fullOrPartialSync(domain, simData);
 
-        auto& d = simData.hydro;
+        auto&  d     = simData.hydro;
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 

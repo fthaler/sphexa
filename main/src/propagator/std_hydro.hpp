@@ -141,6 +141,7 @@ public:
             timer.step("domain::sync");
 
             auto& d = simData.hydro;
+            d.resize(domain.nParticlesWithHalos());
             computeGroups(domain.startIndex(), domain.endIndex(), d, domain.box(), groups_);
             updateSmoothingLengthIterative(groups_.view(), d, domain.box());
             timer.step("UpdateGroupsAndSmoothingLengths");
@@ -163,7 +164,6 @@ public:
         fullOrPartialSync(domain, simData);
 
         auto& d = simData.hydro;
-        d.resize(domain.nParticlesWithHalos());
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 

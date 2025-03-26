@@ -64,6 +64,7 @@ protected:
 
     MHolder_t      mHolder_;
     GroupData<Acc> groups_;
+    int            treeUpdateInterval_ = 4, treeUpdateStep_ = 0;
 
     /*! @brief the list of conserved particles fields with values preserved between iterations
      *
@@ -73,7 +74,7 @@ protected:
 
     //! @brief the list of dependent particle fields, these may be used as scratch space during domain sync
     using DependentFields =
-        FieldList<"rho", "p", "c", "ax", "ay", "az", "du", "c11", "c12", "c13", "c22", "c23", "c33", "nc">;
+        FieldList<"rho", "p", "c", "ax", "ay", "az", "du", "c11", "c12", "c13", "c22", "c23", "c33", "nc", "dtCourant">;
 
 public:
     HydroProp(std::ostream& output, size_t rank)
@@ -104,6 +105,17 @@ public:
         std::apply([&d](auto... f) { d.devData.setDependent(f.value...); }, make_tuple(DependentFields{}));
     }
 
+    void partialSync(DomainType& domain, DataType& simData) const
+    {
+        auto& d = simData.hydro;
+        domain.exchangeHalos(get<"x", "y", "z", "h", "m">(d), get<"ax">(d), get<"ay">(d));
+        if (d.g != 0.0)
+        {
+            domain.updateExpansionCenters(get<"x">(d), get<"y">(d), get<"z">(d), get<"m">(d), get<"ax">(d),
+                                          get<"ay">(d));
+        }
+    }
+
     void sync(DomainType& domain, DataType& simData) override
     {
         auto& d = simData.hydro;
@@ -120,24 +132,41 @@ public:
         d.treeView = domain.octreeProperties();
     }
 
+    void fullOrPartialSync(DomainType& domain, DataType& simData)
+    {
+        if (treeUpdateStep_++ % treeUpdateInterval_ == 0)
+        {
+            sync(domain, simData);
+            timer.step("domain::sync");
+
+            auto& d = simData.hydro;
+            d.resize(domain.nParticlesWithHalos());
+            computeGroups(domain.startIndex(), domain.endIndex(), d, domain.box(), groups_);
+            updateSmoothingLengthIterative(groups_.view(), d, domain.box());
+            timer.step("UpdateGroupsAndSmoothingLengths");
+
+            d.treeView.searchExtFactor *= std::pow(1.012, treeUpdateInterval_ - 1);
+            findNeighborsSfc(groups_.view(), d, domain.box(), true);
+            timer.step("BuildNeighborhood");
+        }
+        else
+        {
+            partialSync(domain, simData);
+            timer.step("domain::sync");
+        }
+    }
+
     void computeForces(DomainType& domain, DataType& simData) override
     {
         timer.start();
 
-        sync(domain, simData);
-        timer.step("domain::sync");
+        fullOrPartialSync(domain, simData);
 
-        auto& d = simData.hydro;
-        d.resize(domain.nParticlesWithHalos());
+        auto&  d     = simData.hydro;
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 
         domain.exchangeHalos(std::tie(get<"m">(d)), get<"ax">(d), get<"ay">(d));
-
-        resizeNeighbors(d, domain.nParticles() * d.ngmax);
-        findNeighborsSfc(first, last, d, domain.box());
-        computeGroups(first, last, d, domain.box(), groups_);
-        timer.step("FindNeighbors");
 
         computeDensity(groups_.view(), d, domain.box());
         timer.step("Density");

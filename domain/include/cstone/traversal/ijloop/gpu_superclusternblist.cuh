@@ -37,19 +37,20 @@
 #include <tuple>
 #include <type_traits>
 
-#include <cub/warp/warp_merge_sort.cuh>
 #include <thrust/execution_policy.h>
 #include <thrust/functional.h>
 #include <thrust/reduce.h>
 #include <thrust/sort.h>
 
 #include "cstone/compressneighbors.cuh"
+#include "cstone/cuda/cub.hpp"
 #include "cstone/cuda/thrust_util.cuh"
 #include "cstone/primitives/math.hpp"
 #include "cstone/reducearray.cuh"
 #include "cstone/traversal/find_neighbors.cuh"
 #include "cstone/traversal/ijloop/atomic_update_ptr.cuh"
 #include "cstone/traversal/ijloop/ijloop.hpp"
+#include "cstone/util/uninitialized.hpp"
 #include "cstone/tree/octree.hpp"
 
 namespace cstone::ijloop
@@ -136,7 +137,7 @@ computeSuperclusterSplitMasks(const LocalIndex firstISupercluster,
 
     do
     {
-        newSplitMask = oldSplitMask | (Config::SuperclusterSplitMask(1) << splitPosition);
+        newSplitMask = oldSplitMask | ((typename Config::SuperclusterSplitMask)(1) << splitPosition);
         oldSplitMask = atomicCAS(splitMaskPtr, oldSplitMask, newSplitMask);
     } while (oldSplitMask != newSplitMask);
 }
@@ -237,7 +238,7 @@ __device__ inline void sortCandidates(std::uint32_t* candidates, unsigned numCan
         if (c < numCandidates) candidates[c] = items[i];
     }
 
-    __syncwarp();
+    syncWarp();
 }
 
 template<class Config, unsigned NumSuperclustersPerBlock, bool UsePbc, class Tc, class Th>
@@ -276,7 +277,7 @@ __device__ inline void pruneCandidates(const Box<Tc>& box,
         his[n] = h[i];
     }
 
-    __syncwarp();
+    syncWarp();
 
     constexpr unsigned iClustersPerWarp = Config::iThreads / Config::iSize;
     const unsigned iClusterOffset       = iClustersPerWarp == 1 ? 0 : threadIdx.x / Config::iSize;
@@ -337,7 +338,7 @@ __device__ inline void pruneCandidates(const Box<Tc>& box,
         }
     }
     numCandidates = numJClusters;
-    __syncwarp();
+    syncWarp();
 }
 
 template<class Config, unsigned NumSuperclustersPerBlock, bool UsePbc, class Tc, class Th, class KeyType>
@@ -450,7 +451,7 @@ __device__ __forceinline__ void collectJClusterCandidates(const OctreeNsView<Tc,
 
     // populate initial cell queue
     if (laneIdx == 0) cellQueue[0] = 1;
-    __syncwarp();
+    syncWarp();
 
     // these variables are always identical on all warp lanes
     int numSources        = 1; // current stack size
@@ -596,7 +597,7 @@ __device__ __forceinline__ void pruneCandidatesAndComputeMasks(const Box<Tc>& bo
     for (unsigned n = laneIdx; n < maxMasksSize; n += GpuConfig::warpSize)
         masks[n] = 0;
 
-    __syncwarp();
+    syncWarp();
 
     constexpr unsigned iClustersPerWarp = Config::iThreads / Config::iSize;
     const unsigned iClusterOffset       = iClustersPerWarp == 1 ? 0 : threadIdx.x / Config::iSize;
@@ -928,9 +929,10 @@ __global__ __launch_bounds__(Config::iThreads* Config::jSize* NumSuperclustersPe
     using particleData_t = decltype(loadParticleData(x, y, z, h, input, 0));
 
     // TODO: bank-conflict friendly SoA layout?
-    __shared__ particleData_t
-        iSuperclusterDataBuffer[NumSuperclustersPerBlock][Config::iClustersPerSupercluster * Config::iSize];
-    particleData_t* iSuperclusterData = iSuperclusterDataBuffer[threadIdx.z];
+    __shared__
+        util::Uninitialized<particleData_t[NumSuperclustersPerBlock][Config::iClustersPerSupercluster * Config::iSize]>
+            iSuperclusterDataBuffer;
+    particleData_t* iSuperclusterData = iSuperclusterDataBuffer.data()[threadIdx.z];
     {
         const unsigned base = iSupercluster * Config::superclusterSize;
         for (unsigned offset = threadIdx.y * Config::iThreads + threadIdx.x; offset < Config::superclusterSize;
@@ -978,9 +980,9 @@ __global__ __launch_bounds__(Config::iThreads* Config::jSize* NumSuperclustersPe
 
     using result_t = std::decay_t<decltype(interaction(particleData_t(), particleData_t(), Vec3<Tc>(), Tc(0)))>;
     static_assert(
-        !Config::symmetric || std::is_same<std::decay_t<decltype(postamble(std::declval<particleData_t>(),
-                                                                           unwrapModifiers(std::declval<result_t>())))>,
-                                           decltype(unwrapModifiers(std::declval<result_t>()))>(),
+        !Config::symmetric ||
+            std::is_same<std::decay_t<decltype(postamble(particleData_t(), unwrapModifiers(result_t())))>,
+                         decltype(unwrapModifiers(result_t()))>(),
         "postamble that changes the result type is not supported in combination with symmetric neighborhood or more "
         "than one warp per cluster-cluster interaction");
 
@@ -1011,7 +1013,7 @@ __global__ __launch_bounds__(Config::iThreads* Config::jSize* NumSuperclustersPe
             {
                 if ((warpMask & 1) && (!Config::symmetric | (iSupercluster != jSupercluster) | (i <= j)))
                 {
-                    const auto& iData = iSuperclusterData[c * Config::iSize + threadIdx.x];
+                    const auto iData = iSuperclusterData[c * Config::iSize + threadIdx.x];
                     assert(std::get<0>(iData) == i - firstValidBody);
                     const auto [ijPosDiff, distSq] = posDiffAndDistSq(UsePbc, box, iData, jData);
                     const auto ijInteraction       = interaction(iData, jData, ijPosDiff, distSq);
@@ -1040,7 +1042,7 @@ __global__ __launch_bounds__(Config::iThreads* Config::jSize* NumSuperclustersPe
     if constexpr (!Config::symmetric && Config::numWarpsPerInteraction > 1)
     {
         __shared__ decltype(buffersForResults<Config::superclusterSize>(
-            unwrapModifiers(std::declval<result_t>()))) outputBuffers[NumSuperclustersPerBlock];
+            unwrapModifiers(result_t()))) outputBuffers[NumSuperclustersPerBlock];
         auto outputBufferPtrs = util::tupleMap([](auto& array) { return array.data(); }, outputBuffers[threadIdx.z]);
         auto init             = unwrapModifiers(result_t{});
         for (unsigned offset = threadIdx.y * Config::iThreads + threadIdx.x; offset < Config::superclusterSize;

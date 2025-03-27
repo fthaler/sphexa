@@ -36,12 +36,12 @@
 #include <tuple>
 #include <type_traits>
 
-#include <cub/warp/warp_merge_sort.cuh>
 #include <thrust/execution_policy.h>
 #include <thrust/functional.h>
 #include <thrust/reduce.h>
 
 #include "cstone/compressneighbors.cuh"
+#include "cstone/cuda/cub.hpp"
 #include "cstone/cuda/thrust_util.cuh"
 #include "cstone/primitives/math.hpp"
 #include "cstone/reducearray.cuh"
@@ -212,21 +212,21 @@ __device__ __forceinline__ void deduplicateAndStoreNeighbors(unsigned* iClusterN
 }
 
 template<class Config, unsigned NumWarpsPerBlock, bool UsePbc, class Tc, class Th, class KeyType>
-__global__
-    __maxnreg__(72) void gpuClusterNbListBuild(const OctreeNsView<Tc, KeyType> __grid_constant__ tree,
-                                               const Box<Tc> __grid_constant__ box,
-                                               const LocalIndex totalBodies,
-                                               const LocalIndex firstBody,
-                                               const LocalIndex lastBody,
-                                               const Tc* const __restrict__ x,
-                                               const Tc* const __restrict__ y,
-                                               const Tc* const __restrict__ z,
-                                               const Th* const __restrict__ h,
-                                               const util::tuple<Vec3<Tc>, Vec3<Tc>>* const __restrict__ jClusterBboxes,
-                                               unsigned* const __restrict__ clusterNeighbors,
-                                               unsigned* const __restrict__ clusterNeighborsCount,
-                                               int* const __restrict__ globalPool,
-                                               const Th maxH)
+__global__ __launch_bounds__(GpuConfig::warpSize* NumWarpsPerBlock) void gpuClusterNbListBuild(
+    const OctreeNsView<Tc, KeyType> __grid_constant__ tree,
+    const Box<Tc> __grid_constant__ box,
+    const LocalIndex totalBodies,
+    const LocalIndex firstBody,
+    const LocalIndex lastBody,
+    const Tc* const __restrict__ x,
+    const Tc* const __restrict__ y,
+    const Tc* const __restrict__ z,
+    const Th* const __restrict__ h,
+    const util::tuple<Vec3<Tc>, Vec3<Tc>>* const __restrict__ jClusterBboxes,
+    unsigned* const __restrict__ clusterNeighbors,
+    unsigned* const __restrict__ clusterNeighborsCount,
+    int* const __restrict__ globalPool,
+    const Th maxH)
 {
     static_assert(Config::ncMax % GpuConfig::warpSize == 0);
     static_assert((Config::ncMax + Config::ncMaxExtra) % GpuConfig::warpSize == 0);
@@ -344,7 +344,7 @@ __global__
 
         // populate initial cell queue
         if (laneIdx == 0) cellQueue[0] = 1;
-        __syncwarp();
+        syncWarp();
 
         // these variables are always identical on all warp lanes
         int numSources        = 1; // current stack size
@@ -669,8 +669,8 @@ __global__ __launch_bounds__(GpuConfig::warpSize* NumWarpsPerBlock) void gpuClus
     using result_t = std::decay_t<decltype(interaction(iData, iData, Vec3<Tc>(), Tc(0)))>;
 
     static_assert(!Config::symmetric ||
-                      std::is_same<std::decay_t<decltype(postamble(iData, unwrapModifiers(std::declval<result_t>())))>,
-                                   decltype(unwrapModifiers(std::declval<result_t>()))>(),
+                      std::is_same<std::decay_t<decltype(postamble(iData, unwrapModifiers(result_t())))>,
+                                   decltype(unwrapModifiers(result_t()))>(),
                   "postamble that changes the result type is not supported in combination with symmetric neighborhood");
 
     result_t result                      = {};
@@ -849,11 +849,12 @@ template<class Config = gpu_cluster_nb_list_neighborhood_detail::GpuClusterNbLis
 struct GpuClusterNbListNeighborhood
 {
     template<unsigned NcMax>
-    using withNcMax = GpuClusterNbListNeighborhood<typename Config::withNcMax<NcMax>>;
+    using withNcMax = GpuClusterNbListNeighborhood<typename Config::template withNcMax<NcMax>>;
     template<unsigned ISize, unsigned JSize>
-    using withClusterSize = GpuClusterNbListNeighborhood<typename Config::withClusterSize<ISize, JSize>>;
+    using withClusterSize = GpuClusterNbListNeighborhood<typename Config::template withClusterSize<ISize, JSize>>;
     template<unsigned ExpectedCompressionRate>
-    using withCompression    = GpuClusterNbListNeighborhood<typename Config::withCompression<ExpectedCompressionRate>>;
+    using withCompression =
+        GpuClusterNbListNeighborhood<typename Config::template withCompression<ExpectedCompressionRate>>;
     using withoutCompression = GpuClusterNbListNeighborhood<typename Config::withoutCompression>;
     using withSymmetry       = GpuClusterNbListNeighborhood<typename Config::withSymmetry>;
     using withoutSymmetry    = GpuClusterNbListNeighborhood<typename Config::withoutSymmetry>;

@@ -46,4 +46,5 @@ void computeDensity(const GroupView& groups, Dataset& d, const cstone::Box<T>& b
     else { densityIjLoop(getNeighborhood(d), d.K, d.m.data(), d.wh.data(), d.rho.data()); }
 }
 
+
 } // namespace sph

@@ -25,8 +25,8 @@ struct MomentumAndEnergyInteractionStd
         constexpr T gradh_i = 1.0;
         constexpr T gradh_j = 1.0;
 
-        const auto [i, iPos, hi, mi, roi, vxi, vyi, vzi, pri, ci, c11i, c12i, c13i, c22i, c23i, c33i] = iData;
-        const auto [j, jPos, hj, mj, roj, vxj, vyj, vzj, prj, cj, c11j, c12j, c13j, c22j, c23j, c33j] = jData;
+        const auto [i, iPos, hi, mi, roi, vxi, vyi, vzi, pri, ci, c11i, c12i, c13i, c22i, c23i, c33i, nci] = iData;
+        const auto [j, jPos, hj, mj, roj, vxj, vyj, vzj, prj, cj, c11j, c12j, c13j, c22j, c23j, c33j, ncj] = jData;
 
         T rx = r_ij[0];
         T ry = r_ij[1];
@@ -97,12 +97,17 @@ struct MomentumAndEnergyInteractionStd
 template<class Tc, class Tm1>
 struct MomentumAndEnergyPostambleStd
 {
-    Tc K;
+    Tc       K;
+    unsigned ngmax;
 
     template<class ParticleData, class Result>
-    constexpr auto operator()(const ParticleData&, const Result& result) const
+    constexpr auto operator()(const ParticleData& iData, const Result& result) const
     {
-        const auto [energy, momentum_x, momentum_y, momentum_z, maxvsignal] = result;
+        const auto [i, iPos, hi, mi, roi, vxi, vyi, vzi, pri, ci, c11i, c12i, c13i, c22i, c23i, c33i, nci] = iData;
+        auto [energy, momentum_x, momentum_y, momentum_z, maxvsignal]                                      = result;
+
+        if (nci < 100 / 4 || nci > ngmax) energy = momentum_x = momentum_y = momentum_z = maxvsignal = 0;
+
         // with the choice of calculating coordinate (r) and velocity (v_ij) differences as i - j,
         // we add the negative sign only here at the end instead of to termA123_ij in each interaction
         using T = std::remove_cvref_t<decltype(momentum_x)>;
@@ -116,8 +121,8 @@ struct MomentumAndEnergyPostambleStdWithDt : MomentumAndEnergyPostambleStd<Tc, T
 {
     Tc Kcour;
 
-    MomentumAndEnergyPostambleStdWithDt(Tc K, Tc Kcour)
-        : MomentumAndEnergyPostambleStd<Tc, Tm1>{K}
+    MomentumAndEnergyPostambleStdWithDt(Tc K, Tc Kcour, unsigned ngmax)
+        : MomentumAndEnergyPostambleStd<Tc, Tm1>{K, ngmax}
         , Kcour(Kcour)
     {
     }
@@ -127,7 +132,7 @@ struct MomentumAndEnergyPostambleStdWithDt : MomentumAndEnergyPostambleStd<Tc, T
     {
         const auto [du, grad_P_x, grad_P_y, grad_P_z, maxvsignal] =
             MomentumAndEnergyPostambleStd<Tc, Tm1>::operator()(iData, result);
-        const auto [i, iPos, hi, mi, roi, vxi, vyi, vzi, pri, ci, c11i, c12i, c13i, c22i, c23i, c33i] = iData;
+        const auto [i, iPos, hi, mi, roi, vxi, vyi, vzi, pri, ci, c11i, c12i, c13i, c22i, c23i, c33i, nci] = iData;
 
         auto dt = tsKCourant(maxvsignal, hi, ci, Kcour);
         return std::make_tuple(du, grad_P_x, grad_P_y, grad_P_z, dt);
@@ -137,15 +142,16 @@ struct MomentumAndEnergyPostambleStdWithDt : MomentumAndEnergyPostambleStd<Tc, T
 template<size_t stride = 1, class Tc, class Tm, class T, class Tm1>
 HOST_DEVICE_FUN inline void
 momentumAndEnergyJLoop(cstone::LocalIndex i, Tc K, const cstone::Box<Tc>& box, const cstone::LocalIndex* neighbors,
-                       unsigned neighborsCount, const Tc* x, const Tc* y, const Tc* z, const T* vx, const T* vy,
-                       const T* vz, const T* h, const Tm* m, const T* rho, const T* p, const T* c, const T* c11,
-                       const T* c12, const T* c13, const T* c22, const T* c23, const T* c33, const T* wh,
-                       const T* /*whd*/, T* grad_P_x, T* grad_P_y, T* grad_P_z, Tm1* du, T* maxvsignal)
+                       unsigned neighborsCount, unsigned ngmax, const Tc* x, const Tc* y, const Tc* z, const T* vx,
+                       const T* vy, const T* vz, const T* h, const Tm* m, const T* rho, const T* p, const T* c,
+                       const T* c11, const T* c12, const T* c13, const T* c22, const T* c23, const T* c33,
+                       const unsigned* nc, const T* wh, const T* /*whd*/, T* grad_P_x, T* grad_P_y, T* grad_P_z,
+                       Tm1* du, T* maxvsignal)
 {
     MomentumAndEnergyInteractionStd<T, Tm1> interaction{wh};
-    MomentumAndEnergyPostambleStd<Tc, Tm1>  postamble{K};
+    MomentumAndEnergyPostambleStd<Tc, Tm1>  postamble{K, ngmax};
 
-    const auto input  = std::make_tuple(m, rho, vx, vy, vz, p, c, c11, c12, c13, c22, c23, c33);
+    const auto input  = std::make_tuple(m, rho, vx, vy, vz, p, c, c11, c12, c13, c22, c23, c33, nc);
     const auto output = std::make_tuple(du, grad_P_x, grad_P_y, grad_P_z, maxvsignal - i);
 
     const auto iData  = cstone::ijloop::loadParticleData(x, y, z, h, input, i);
@@ -169,15 +175,15 @@ momentumAndEnergyJLoop(cstone::LocalIndex i, Tc K, const cstone::Box<Tc>& box, c
 }
 
 template<class Neighborhood, class Tc, class T, class Tm, class Tm1>
-void momentumAndEnergyIjLoop(Neighborhood const& neighborhood, Tc K, Tc Kcour, const Tm* m, const T* rho, const T* vx,
-                             const T* vy, const T* vz, const T* p, const T* c, const T* c11, const T* c12, const T* c13,
-                             const T* c22, const T* c23, const T* c33, const T* wh, Tm1* du, T* grad_P_x, T* grad_P_y,
-                             T* grad_P_z, T* dt)
+void momentumAndEnergyIjLoop(Neighborhood const& neighborhood, Tc K, Tc Kcour, unsigned ngmax, const Tm* m,
+                             const T* rho, const T* vx, const T* vy, const T* vz, const T* p, const T* c, const T* c11,
+                             const T* c12, const T* c13, const T* c22, const T* c23, const T* c33, const unsigned* nc,
+                             const T* wh, Tm1* du, T* grad_P_x, T* grad_P_y, T* grad_P_z, T* dt)
 {
-    neighborhood.ijLoop(std::make_tuple(m, rho, vx, vy, vz, p, c, c11, c12, c13, c22, c23, c33),
+    neighborhood.ijLoop(std::make_tuple(m, rho, vx, vy, vz, p, c, c11, c12, c13, c22, c23, c33, nc),
                         std::make_tuple(du, grad_P_x, grad_P_y, grad_P_z, dt),
                         MomentumAndEnergyInteractionStd<T, Tm1>{wh},
-                        MomentumAndEnergyPostambleStdWithDt<Tc, Tm1>{K, Kcour});
+                        MomentumAndEnergyPostambleStdWithDt<Tc, Tm1>{K, Kcour, ngmax});
 }
 
 } // namespace sph

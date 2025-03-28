@@ -72,11 +72,10 @@ template void updateSmoothingLengthGpu(const GroupView& grp, unsigned ng0, const
 __device__ bool nc_h_convergenceFailure = false;
 
 template<class Tc, class T, class KeyType>
-__global__ void
-updateSmoothingLengthIterativeGpuKernel(unsigned ng0, unsigned ngmax, const cstone::Box<Tc> box,
-                                        const LocalIndex* grpStart, const LocalIndex* grpEnd, LocalIndex numGroups,
-                                        const cstone::OctreeNsView<Tc, KeyType> tree, const Tc* x, const Tc* y,
-                                        const Tc* z, T* h, unsigned* nc, LocalIndex* nidx, TreeNodeIndex* globalPool)
+__global__ void updateSmoothingLengthIterativeGpuKernel(
+    unsigned ng0, unsigned ngmax, const cstone::Box<Tc> box, const LocalIndex* grpStart, const LocalIndex* grpEnd,
+    LocalIndex numGroups, const cstone::OctreeNsView<Tc, KeyType> tree, const Tc* x, const Tc* y, const Tc* z, T* h,
+    unsigned* nc, unsigned* nc_it_stat, LocalIndex* nidx, TreeNodeIndex* globalPool)
 {
     unsigned laneIdx     = threadIdx.x & (GpuConfig::warpSize - 1);
     unsigned targetIdx   = 0;
@@ -104,11 +103,12 @@ updateSmoothingLengthIterativeGpuKernel(unsigned ng0, unsigned ngmax, const csto
         {
             bool repeat = (ncSph < ng0 / 4 || (ncSph - 1) > ngmax) && i < bodyEnd;
             if (!cstone::ballotSync(repeat)) { break; }
+            nc_it_stat[i]++;
             if (repeat) { h[i] = updateH(ng0, ncSph, h[i]); }
             ncSph =
                 1 + traverseNeighbors(bodyBegin, bodyEnd, x, y, z, h, tree, box, neighborsWarp, ngmax, globalPool)[0];
 
-            if (ncIt == ncMaxIteration) { nc_h_convergenceFailure = true; }
+            // if (ncIt == ncMaxIteration) { nc_h_convergenceFailure = true; }
         }
 
         if (i >= bodyEnd) continue;
@@ -125,7 +125,8 @@ void updateSmoothingLengthIterativeGpu(const cstone::GroupView& grp, Dataset& d,
 
     updateSmoothingLengthIterativeGpuKernel<<<TravConfig::numBlocks(), TravConfig::numThreads>>>(
         d.ng0, d.ngmax, box, grp.groupStart, grp.groupEnd, grp.numGroups, d.treeView, rawPtr(d.devData.x),
-        rawPtr(d.devData.y), rawPtr(d.devData.z), rawPtr(d.devData.h), rawPtr(d.devData.nc), nidxPool, traversalPool);
+        rawPtr(d.devData.y), rawPtr(d.devData.z), rawPtr(d.devData.h), rawPtr(d.devData.nc),
+        rawPtr(d.devData.nb_it_stat), nidxPool, traversalPool);
     checkGpuErrors(cudaDeviceSynchronize());
 
     NcStats::type stats[NcStats::numStats];

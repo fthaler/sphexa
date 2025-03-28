@@ -39,8 +39,8 @@ void updateSmoothingLength(const GroupView& grp, Dataset& d)
 }
 
 template<class Tc, class T, class KeyType>
-void updateSmoothingLengthIterativeCpu(const Tc* x, const Tc* y, const Tc* z, T* h, unsigned* nc, LocalIndex firstId,
-                                       LocalIndex lastId, const cstone::Box<Tc>& box,
+void updateSmoothingLengthIterativeCpu(const Tc* x, const Tc* y, const Tc* z, T* h, unsigned* nc, unsigned* nb_it_stat,
+                                       LocalIndex firstId, LocalIndex lastId, const cstone::Box<Tc>& box,
                                        const cstone::OctreeNsView<Tc, KeyType>& treeView, unsigned ng0, unsigned ngmax)
 {
     LocalIndex numWork = lastId - firstId;
@@ -63,6 +63,7 @@ void updateSmoothingLengthIterativeCpu(const Tc* x, const Tc* y, const Tc* z, T*
             int iteration = 0;
             while ((ngmin > ncSph || (ncSph - 1) > ngmax) && iteration++ < maxIteration)
             {
+                nb_it_stat[id]++;
                 h[id] = updateH(ng0, ncSph, h[id]);
                 ncSph = 1 + findNeighbors(id, x, y, z, h, treeView, box, ngmax, neighbors.data());
             }
@@ -88,8 +89,9 @@ void updateSmoothingLengthIterative(const cstone::GroupView& groups, Dataset& d,
     }
     else
     {
-        updateSmoothingLengthIterativeCpu(d.x.data(), d.y.data(), d.z.data(), d.h.data(), d.nc.data(), groups.firstBody,
-                                          groups.lastBody, box, d.treeView, d.ng0, d.ngmax);
+        updateSmoothingLengthIterativeCpu(d.x.data(), d.y.data(), d.z.data(), d.h.data(), d.nc.data(),
+                                          d.nb_it_stat.data(), groups.firstBody, groups.lastBody, box, d.treeView,
+                                          d.ng0, d.ngmax);
     }
 }
 

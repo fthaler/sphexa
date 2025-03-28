@@ -99,8 +99,10 @@ TEST_F(SphKernelTestsStd, IAD)
 {
     std::vector<T> iad(6, -1);
 
-    IADJLoopSTD(0, K, box(), neighbors.data(), neighborsCount, x.data(), y.data(), z.data(), h.data(), m.data(),
-                rho.data(), wh.data(), whd.data(), &iad[0], &iad[1], &iad[2], &iad[3], &iad[4], &iad[5]);
+    std::vector<unsigned> nc(x.size(), 100); // not the real neighbor count as we want to test the 'normal' case
+    IADJLoopSTD(0, K, box(), neighbors.data(), neighborsCount, 150, x.data(), y.data(), z.data(), h.data(),
+                m.data(), rho.data(), nc.data(), wh.data(), whd.data(), &iad[0], &iad[1], &iad[2], &iad[3], &iad[4],
+                &iad[5]);
 
     EXPECT_NEAR(iad[0], 0.68826690779384281, 1e-8);
     EXPECT_NEAR(iad[1], -0.12963692768970825, 1e-8);
@@ -114,10 +116,11 @@ TEST_F(SphKernelTestsStd, MomentumEnergy)
 {
     auto [du, grad_Px, grad_Py, grad_Pz, maxvsignal] = std::array<T, 5>{-1, -1, -1, -1, -1};
 
-    momentumAndEnergyJLoop(0, K, box(), neighbors.data(), neighborsCount, x.data(), y.data(), z.data(), vx.data(),
-                           vy.data(), vz.data(), h.data(), m.data(), rho.data(), p.data(), c.data(), c11.data(),
-                           c12.data(), c13.data(), c22.data(), c23.data(), c33.data(), wh.data(), whd.data(), &grad_Px,
-                           &grad_Py, &grad_Pz, &du, &maxvsignal);
+    std::vector<unsigned> nc(x.size(), 100); // not the real neighbor count as we want to test the 'normal' case
+    momentumAndEnergyJLoop(0, K, box(), neighbors.data(), neighborsCount, 150, x.data(), y.data(), z.data(),
+                           vx.data(), vy.data(), vz.data(), h.data(), m.data(), rho.data(), p.data(), c.data(),
+                           c11.data(), c12.data(), c13.data(), c22.data(), c23.data(), c33.data(), nc.data(), wh.data(),
+                           whd.data(), &grad_Px, &grad_Py, &grad_Pz, &du, &maxvsignal);
 
     EXPECT_NEAR(grad_Px, 14.407211846688075, 1.3e-7);
     EXPECT_NEAR(grad_Py, -1.2396802157028355, 1.4e-7);

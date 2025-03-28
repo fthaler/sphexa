@@ -44,10 +44,10 @@ void computeMomentumEnergySTD(const GroupView& groups, Dataset& d, const cstone:
     if constexpr (cstone::HaveGpu<typename Dataset::AcceleratorType>{}) { computeMomentumEnergyStdGpu(groups, d, box); }
     else
     {
-        momentumAndEnergyIjLoop(getNeighborhood(d), d.K, d.Kcour, d.m.data(), d.rho.data(), d.vx.data(), d.vy.data(),
-                                d.vz.data(), d.p.data(), d.c.data(), d.c11.data(), d.c12.data(), d.c13.data(),
-                                d.c22.data(), d.c23.data(), d.c33.data(), d.wh.data(), d.du.data(), d.ax.data(),
-                                d.ay.data(), d.az.data(), d.dtCourant.data());
+        momentumAndEnergyIjLoop(getNeighborhood(d), d.K, d.Kcour, d.ngmax, d.m.data(), d.rho.data(), d.vx.data(),
+                                d.vy.data(), d.vz.data(), d.p.data(), d.c.data(), d.c11.data(), d.c12.data(),
+                                d.c13.data(), d.c22.data(), d.c23.data(), d.c33.data(), d.nc.data(), d.wh.data(),
+                                d.du.data(), d.ax.data(), d.ay.data(), d.az.data(), d.dtCourant.data());
 
         auto minDt = std::numeric_limits<typename Dataset::HydroType>::infinity();
 #pragma omp parallel for reduction(min : minDt)
@@ -55,6 +55,32 @@ void computeMomentumEnergySTD(const GroupView& groups, Dataset& d, const cstone:
             minDt = std::min(minDt, d.dtCourant[i]);
         d.minDtCourant = minDt;
     }
+}
+
+template<typename Dataset>
+void relaxSystemImpl(size_t first, size_t last, Dataset& d)
+{
+    using T = std::decay_t<decltype(d.vx[0])>;
+#pragma omp parallel for
+    for (size_t i = first; i < last; i++)
+    {
+        d.ax[i] -= d.vx[i] / d.relaxationTimescale;
+        d.ay[i] -= d.vy[i] / d.relaxationTimescale;
+        d.az[i] -= d.vz[i] / d.relaxationTimescale;
+    }
+}
+
+template<typename Dataset>
+void relaxSystem(size_t startIndex, size_t endIndex, Dataset& d)
+{
+    // add damping force
+    if (d.relaxationTimescale <= 0.) return;
+    if constexpr (cstone::HaveGpu<typename Dataset::AcceleratorType>{})
+    {
+        relaxSystemGPU(startIndex, endIndex, rawPtr(d.devData.ax), rawPtr(d.devData.ay), rawPtr(d.devData.az),
+                       rawPtr(d.devData.vx), rawPtr(d.devData.vy), rawPtr(d.devData.vz), d.relaxationTimescale);
+    }
+    else { relaxSystemImpl(startIndex, endIndex, d); }
 }
 
 } // namespace sph

@@ -19,8 +19,8 @@ struct IADInteractionSTD
     constexpr auto operator()(const ParticleData& iData, const ParticleData& jData, cstone::Vec3<Tc> const& r_ij,
                               T r2) const
     {
-        const auto [i, iPos, hi, mi, roi] = iData;
-        const auto [j, jPos, hj, mj, roj] = jData;
+        const auto [i, iPos, hi, mi, roi, nci] = iData;
+        const auto [j, jPos, hj, mj, roj, ncj] = jData;
 
         T rx = r_ij[0];
         T ry = r_ij[1];
@@ -48,12 +48,13 @@ struct IADInteractionSTD
 template<class T, class Tc>
 struct IADPostambleSTD
 {
-    Tc K;
+    Tc       K;
+    unsigned ngmax;
 
     template<class ParticleData, class Result>
     constexpr auto operator()(const ParticleData& iData, const Result& result) const
     {
-        const auto [i, iPos, hi, mi, roi]               = iData;
+        const auto [i, iPos, hi, mi, roi, nci]          = iData;
         auto [tau11, tau12, tau13, tau22, tau23, tau33] = result;
 
         auto getExp    = [](T val) { return (val == T(0) ? 0 : std::ilogb(val)); };
@@ -75,6 +76,8 @@ struct IADPostambleSTD
         // divide by K/h^3.
         T factor = normalization * (hi * hi * hi) / (det * K);
 
+        if (nci < 100 / 4 || nci >= ngmax) factor = 0;
+
         return std::make_tuple(                       //
             (tau22 * tau33 - tau23 * tau23) * factor, //
             (tau13 * tau23 - tau33 * tau12) * factor, //
@@ -87,14 +90,15 @@ struct IADPostambleSTD
 
 template<size_t stride = 1, class Tc, class Tm, class T>
 HOST_DEVICE_FUN inline void IADJLoopSTD(cstone::LocalIndex i, Tc K, const cstone::Box<Tc>& box,
-                                        const cstone::LocalIndex* neighbors, unsigned neighborsCount, const Tc* x,
-                                        const Tc* y, const Tc* z, const T* h, const Tm* m, const T* rho, const T* wh,
-                                        const T* /*whd*/, T* c11, T* c12, T* c13, T* c22, T* c23, T* c33)
+                                        const cstone::LocalIndex* neighbors, unsigned neighborsCount, unsigned ngmax,
+                                        const Tc* x, const Tc* y, const Tc* z, const T* h, const Tm* m, const T* rho,
+                                        const unsigned* nc, const T* wh, const T* /*whd*/, T* c11, T* c12, T* c13,
+                                        T* c22, T* c23, T* c33)
 {
     IADInteractionSTD      interaction{wh};
-    IADPostambleSTD<T, Tc> postamble{K};
+    IADPostambleSTD<T, Tc> postamble{K, ngmax};
 
-    const auto input  = std::make_tuple(m, rho);
+    const auto input  = std::make_tuple(m, rho, nc);
     const auto output = std::make_tuple(c11, c12, c13, c22, c23, c33);
 
     const auto iData  = cstone::ijloop::loadParticleData(x, y, z, h, input, i);
@@ -118,11 +122,10 @@ HOST_DEVICE_FUN inline void IADJLoopSTD(cstone::LocalIndex i, Tc K, const cstone
 }
 
 template<class Neighborhood, class Tc, class Tm, class T>
-void IADIjLoop(Neighborhood const& neighborhood, Tc K, const Tm* m, const T* rho, const T* wh, T* c11, T* c12, T* c13,
-               T* c22, T* c23, T* c33)
+void IADIjLoop(Neighborhood const& neighborhood, Tc K, unsigned ngmax, const Tm* m, const T* rho, const unsigned* nc,
+               const T* wh, T* c11, T* c12, T* c13, T* c22, T* c23, T* c33)
 {
-    neighborhood.ijLoop(std::make_tuple(m, rho), std::make_tuple(c11, c12, c13, c22, c23, c33),
-                        IADInteractionSTD<T>{wh}, IADPostambleSTD<T, Tc>{K});
+    neighborhood.ijLoop(std::make_tuple(m, rho, nc), std::make_tuple(c11, c12, c13, c22, c23, c33),
+                        IADInteractionSTD<T>{wh}, IADPostambleSTD<T, Tc>{K, ngmax});
 }
-
 } // namespace sph

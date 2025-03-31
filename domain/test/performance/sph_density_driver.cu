@@ -38,6 +38,7 @@
 #include <thrust/universal_vector.h>
 
 #include "cstone/cuda/thrust_util.cuh"
+#include "cstone/cuda/cuda_runtime.hpp"
 #include "cstone/traversal/ijloop/gpu_alwaystraverse.cuh"
 #include "cstone/traversal/ijloop/gpu_clusternblist.cuh"
 #include "cstone/traversal/ijloop/gpu_fullnblist.cuh"
@@ -54,10 +55,15 @@ constexpr int kTableSize = 20000;
 template<typename T>
 constexpr inline T wharmonic_std(T v)
 {
-    if (v == 0.0) { return 1.0; }
+    if (v == 0) { return 1; }
 
     const T Pv = T(M_PI_2) * v;
-    return std::sin(Pv) / Pv;
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+    if constexpr (std::is_same_v<T, float>)
+        return __sinf(Pv) * (T(1) / Pv);
+    else
+#endif
+        return std::sin(Pv) * (T(1) / Pv);
 }
 
 template<class T, class F>
@@ -72,6 +78,11 @@ tabulateFunction(F&& func, const double lowerSupport, const double upperSupport,
         T normalizedVal = lowerSupport + i * dx;
         table[i]        = func(normalizedVal);
     }
+
+    // required on AMD for decent performance
+    int device;
+    checkGpuErrors(cudaGetDevice(&device));
+    checkGpuErrors(cudaMemPrefetchAsync(rawPtr(table), sizeof(T) * n, device, 0));
 
     return table;
 }
@@ -115,9 +126,15 @@ struct DensityKernelFun
     {
         const auto [i, iPos, hi, mi] = iData;
         const auto [j, jPos, hj, mj] = jData;
-        const T dist                 = std::sqrt(distSq);
-        const T vloc                 = dist * (T(1) / hi);
-        const T w                    = i == j ? T(1) : table_lookup<UseKernelTable>(wh, vloc);
+        T dist;
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        if constexpr (std::is_same_v<T, float>)
+            dist = __fsqrt_rn(distSq);
+        else
+#endif
+            dist = std::sqrt(distSq);
+        const T vloc = dist * (T(1) / hi);
+        const T w    = i == j ? T(1) : table_lookup<UseKernelTable>(wh, vloc);
         return std::make_tuple(cstone::ijloop::symmetric::even(w * mj));
     }
 };

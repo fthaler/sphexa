@@ -74,7 +74,7 @@ protected:
 
     //! @brief the list of dependent particle fields, these may be used as scratch space during domain sync
     using DependentFields = FieldList<"rho", "p", "c", "ax", "ay", "az", "du", "c11", "c12", "c13", "c22", "c23", "c33",
-                                      "nc", "nb_it_stat", "dtCourant">;
+                                      "nc", "dtCourant">;
 
 public:
     HydroProp(std::ostream& output, size_t rank)
@@ -165,7 +165,6 @@ public:
         auto&  d     = simData.hydro;
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
-        fill(get<"nb_it_stat">(d), 0, domain.nParticlesWithHalos(), unsigned{0});
 
         domain.exchangeHalos(std::tie(get<"m">(d)), get<"ax">(d), get<"ay">(d));
 

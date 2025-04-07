@@ -154,6 +154,8 @@ public:
         {
             partialSync(domain, simData);
             timer.step("domain::sync");
+            timer.step("UpdateGroupsAndSmoothingLengths");
+            timer.step("BuildNeighborhood");
         }
     }
 

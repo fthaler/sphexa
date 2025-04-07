@@ -32,8 +32,11 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <format>
 #include <limits>
+#include <map>
 #include <tuple>
+#include <vector>
 
 #include <thrust/universal_vector.h>
 
@@ -52,18 +55,61 @@
 
 constexpr int kTableSize = 20000;
 
+template<class T>
+constexpr __forceinline__ T fastSin(T x)
+{
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+    if constexpr (std::is_same_v<T, float>)
+        x = __sinf(x);
+    else
+#endif
+        x = std::sin(x);
+    return x;
+}
+
+template<class T>
+constexpr __forceinline__ T fastInv(T x)
+{
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+    if constexpr (std::is_same_v<T, float>)
+#if defined(__CUDA_ARCH__)
+        asm("rcp.approx.ftz.f32 %0,%0;" : "+f"(x) :);
+#else
+        x = __frcp_rn(x);
+#endif
+    else if constexpr (std::is_same_v<T, double>)
+#if defined(__CUDA_ARCH__)
+        asm("rcp.approx.ftz.f64 %0,%0;" : "+d"(x) :);
+#else
+        x = __drcp_rn(x);
+#endif
+    else
+#endif
+        x = T(1) / x;
+    return x;
+}
+
+template<class T>
+constexpr __forceinline__ T fastSqrt(T x)
+{
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+    if constexpr (std::is_same_v<T, float>)
+        x = __fsqrt_rn(x);
+    else if constexpr (std::is_same_v<T, double>)
+        x = __dsqrt_rn(x);
+    else
+#endif
+        x = std::sqrt(x);
+    return x;
+}
+
 template<typename T>
 constexpr inline T wharmonic_std(T v)
 {
     if (v == 0) { return 1; }
 
     const T Pv = T(M_PI_2) * v;
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    if constexpr (std::is_same_v<T, float>)
-        return __sinf(Pv) * (T(1) / Pv);
-    else
-#endif
-        return std::sin(Pv) * (T(1) / Pv);
+    return fastSin(Pv) * fastInv(Pv);
 }
 
 template<class T, class F>
@@ -126,15 +172,9 @@ struct DensityKernelFun
     {
         const auto [i, iPos, hi, mi] = iData;
         const auto [j, jPos, hj, mj] = jData;
-        T dist;
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-        if constexpr (std::is_same_v<T, float>)
-            dist = __fsqrt_rn(distSq);
-        else
-#endif
-            dist = std::sqrt(distSq);
-        const T vloc = dist * (T(1) / hi);
-        const T w    = i == j ? T(1) : table_lookup<UseKernelTable>(wh, vloc);
+        const T dist                 = fastSqrt(distSq);
+        const T vloc                 = dist * fastInv(hi);
+        const T w                    = i == j ? T(1) : table_lookup<UseKernelTable>(wh, vloc);
         return std::make_tuple(cstone::ijloop::symmetric::even(w * mj));
     }
 };
@@ -150,41 +190,45 @@ void benchmarkMain()
     constexpr unsigned n     = 100000 * scale;
     const T h                = 0.75 / 20 / std::cbrt(scale);
 
-    RandomCoordinates<Tc, StrongKeyType> coords(n, {0, 1, BoundaryType::periodic});
+    RandomCoordinates<Tc, StrongKeyType> coords(n, {0, 1, BoundaryType::open});
 
     const auto wh = kernelTable<T>();
     const DensityKernelFun<UseKernelTable, T> kernelFun{rawPtr(wh)};
     const auto inputValues         = std::tuple(T(1));
     const auto initialOutputValues = std::tuple(std::numeric_limits<T>::quiet_NaN());
 
+    std::map<std::string, std::vector<double>> times;
+
     const auto runBenchmark = [&](const char* name, auto const& neighborhood)
     {
         printf("--- %s ---\n", name);
-        benchmarkNeighborhood<Tc, T, StrongKeyType>(coords, neighborhood, h, ngmax, kernelFun, inputValues,
-                                                    initialOutputValues);
+        times[name] = benchmarkNeighborhood<Tc, T, StrongKeyType>(coords, neighborhood, h, 1, ngmax, kernelFun,
+                                                                  inputValues, initialOutputValues);
         printf("\n");
     };
 
-    runBenchmark("BATCHED DIRECT", ijloop::GpuAlwaysTraverseNeighborhood{ngmax});
-    runBenchmark("NAIVE TWO-STAGE", ijloop::GpuFullNbListNeighborhood{ngmax});
-    runBenchmark("GROMACS CLUSTERED TWO-STAGE", ijloop::GromacsLikeNeighborhood{ngmax});
+    runBenchmark("DIRECT TREE TRAVERSAL", ijloop::GpuAlwaysTraverseNeighborhood{ngmax});
+    runBenchmark("FULL NB LIST", ijloop::GpuFullNbListNeighborhood{ngmax});
+    runBenchmark("GROMACS SUPERCLUSTERED", ijloop::GromacsLikeNeighborhood{ngmax});
 
     using BaseClusterNb = ijloop::GpuClusterNbListNeighborhood<>::withNcMax<192>::withClusterSize<4, 4>;
-    runBenchmark("CLUSTERED TWO-STAGE", BaseClusterNb::withoutSymmetry::withoutCompression{});
-    runBenchmark("COMPRESSED CLUSTERED TWO-STAGE", BaseClusterNb::withoutSymmetry::withCompression<9>{});
+    runBenchmark("CLUSTERED", BaseClusterNb::withoutSymmetry::withoutCompression{});
+    runBenchmark("COMPRESSED CLUSTERED", BaseClusterNb::withoutSymmetry::withCompression<9>{});
 
     using SymmetricClusterNb = BaseClusterNb::withNcMax<128>::withSymmetry;
-    runBenchmark("CLUSTERED TWO-STAGE SYMMETRIC", SymmetricClusterNb::withoutCompression{});
-    runBenchmark("COMPRESSED CLUSTERED TWO-STAGE ", SymmetricClusterNb::withCompression<7>{});
+    runBenchmark("CLUSTERED SYMMETRIC", SymmetricClusterNb::withoutCompression{});
+    runBenchmark("COMPRESSED CLUSTERED", SymmetricClusterNb::withCompression<7>{});
 
     using BaseSuperclusterNb =
         ijloop::GpuSuperclusterNbListNeighborhood<>::withClusterSize<8, 8>::withSuperclusterSize<64>::withNcMax<1024>;
-    runBenchmark("SUPERCLUSTERED TWO-STAGE", BaseSuperclusterNb::withoutSymmetry::withoutCompression{});
-    runBenchmark("COMPRESSED SUPERCLUSTERED TWO-STAGE", BaseSuperclusterNb::withoutSymmetry::withCompression{});
+    runBenchmark("SUPERCLUSTERED", BaseSuperclusterNb::withoutSymmetry::withoutCompression{});
+    runBenchmark("COMPRESSED SUPERCLUSTERED", BaseSuperclusterNb::withoutSymmetry::withCompression{});
 
     using SymmetricSuperclusterNb = BaseSuperclusterNb::withNcMax<512>::withSymmetry;
-    runBenchmark("SUPERCLUSTERED TWO-STAGE SYMMETRIC", SymmetricSuperclusterNb::withoutCompression{});
-    runBenchmark("COMPRESSED SUPERCLUSTERED TWO-STAGE SYMMETRIC", SymmetricSuperclusterNb::withCompression{});
+    runBenchmark("SUPERCLUSTERED SYMMETRIC", SymmetricSuperclusterNb::withoutCompression{});
+    runBenchmark("COMPRESSED SUPERCLUSTERED SYMMETRIC", SymmetricSuperclusterNb::withCompression{});
+
+    saveCsv(std::format("sph_density_results_{}_{}.csv", typeid(Tc).name(), typeid(T).name()), times);
 }
 
 int main()

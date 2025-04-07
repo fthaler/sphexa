@@ -33,7 +33,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <numeric>
+#include <fstream>
 #include <vector>
 
 #include <thrust/universal_vector.h>
@@ -55,13 +57,15 @@ template<class Tc,
          class Interaction,
          class... InputTs,
          class... OutputTs>
-void benchmarkNeighborhood(const Coords& coords,
-                           const Neighborhood& neighborhood,
-                           const T hVal,
-                           unsigned ngmax,
-                           const Interaction& interaction,
-                           const std::tuple<InputTs...>& inputValues,
-                           const std::tuple<OutputTs...>& initialOutputValues)
+std::vector<double> benchmarkNeighborhood(const Coords& coords,
+                                          const Neighborhood& neighborhood,
+                                          const T hVal,
+                                          const float searchExtFactor,
+                                          unsigned ngmax,
+                                          const Interaction& interaction,
+                                          const std::tuple<InputTs...>& inputValues,
+                                          const std::tuple<OutputTs...>& initialOutputValues,
+                                          bool validate = true)
 {
     using namespace cstone;
     using KeyType = typename StrongKeyType::ValueType;
@@ -72,7 +76,14 @@ void benchmarkNeighborhood(const Coords& coords,
     const double r                  = 2 * hVal;
     const double expected_neighbors = 4.0 / 3.0 * M_PI * r * r * r * n / (box.lx() * box.ly() * box.lz());
     printf("Number of particles: %u\n", n);
-    printf("Expected average number of neighbors: %.0f\n", expected_neighbors);
+    printf("Expected average number of neighbors for computations: %.0f\n", expected_neighbors);
+    if (searchExtFactor != 1)
+    {
+        const double rExt = r * searchExtFactor;
+        const double expected_neighbors_in_list =
+            4.0 / 3.0 * M_PI * rExt * rExt * rExt * n / (box.lx() * box.ly() * box.lz());
+        printf("Expected average number of neighbors in NB lists: %.0f\n", expected_neighbors_in_list);
+    }
 
     const Tc* x         = coords.x().data();
     const Tc* y         = coords.y().data();
@@ -94,15 +105,16 @@ void benchmarkNeighborhood(const Coords& coords,
     std::span<const KeyType> nodeKeys(octree.prefixes.data(), octree.numNodes);
     nodeFpCenters<KeyType>(nodeKeys, centers.data(), sizes.data(), box);
 
-    const OctreeNsView<Tc, KeyType> nsView{octree.numLeafNodes,
-                                           octree.prefixes.data(),
-                                           octree.childOffsets.data(),
-                                           octree.internalToLeaf.data(),
-                                           octree.levelRange.data(),
-                                           keys,
-                                           layout.data(),
-                                           centers.data(),
-                                           sizes.data()};
+    const OctreeNsView<Tc, KeyType> nsView{.numLeafNodes    = octree.numLeafNodes,
+                                           .prefixes        = octree.prefixes.data(),
+                                           .childOffsets    = octree.childOffsets.data(),
+                                           .internalToLeaf  = octree.internalToLeaf.data(),
+                                           .levelRange      = octree.levelRange.data(),
+                                           .leaves          = keys,
+                                           .layout          = layout.data(),
+                                           .centers         = centers.data(),
+                                           .sizes           = sizes.data(),
+                                           .searchExtFactor = 1};
     LocalIndex zero = 0;
     const GroupView groupView{.firstBody = 0, .lastBody = n, .numGroups = 1, .groupStart = &zero, .groupEnd = &n};
 
@@ -142,15 +154,16 @@ void benchmarkNeighborhood(const Coords& coords,
                1.0e6);
 
     const thrust::universal_vector<KeyType> dCodes(coords.particleKeys().begin(), coords.particleKeys().end());
-    const OctreeNsView<Tc, KeyType> dNsView{.numLeafNodes   = octree.numLeafNodes,
-                                            .prefixes       = rawPtr(dPrefixes),
-                                            .childOffsets   = rawPtr(dChildOffsets),
-                                            .internalToLeaf = rawPtr(dInternalToLeaf),
-                                            .levelRange     = rawPtr(dLevelRange),
-                                            .leaves         = rawPtr(dCodes),
-                                            .layout         = rawPtr(dLayout),
-                                            .centers        = rawPtr(dCenters),
-                                            .sizes          = rawPtr(dSizes)};
+    const OctreeNsView<Tc, KeyType> dNsView{.numLeafNodes    = octree.numLeafNodes,
+                                            .prefixes        = rawPtr(dPrefixes),
+                                            .childOffsets    = rawPtr(dChildOffsets),
+                                            .internalToLeaf  = rawPtr(dInternalToLeaf),
+                                            .levelRange      = rawPtr(dLevelRange),
+                                            .leaves          = rawPtr(dCodes),
+                                            .layout          = rawPtr(dLayout),
+                                            .centers         = rawPtr(dCenters),
+                                            .sizes           = rawPtr(dSizes),
+                                            .searchExtFactor = searchExtFactor};
 
     constexpr unsigned groupSize = TravConfig::targetSize;
     DeviceVector<LocalIndex> temp, groups;
@@ -177,8 +190,8 @@ void benchmarkNeighborhood(const Coords& coords,
     util::for_each_tuple(prefetchToDevice, dInputs);
     util::for_each_tuple(prefetchToDevice, dOutputs);
 
-    std::array<float, 11> times;
-    std::array<cudaEvent_t, times.size() + 1> events;
+    std::vector<double> times(101);
+    std::vector<cudaEvent_t> events(times.size() + 1);
     for (auto& event : events)
         checkGpuErrors(cudaEventCreate(&event));
     checkGpuErrors(cudaEventRecord(events[0]));
@@ -193,47 +206,103 @@ void benchmarkNeighborhood(const Coords& coords,
 
     for (std::size_t i = 0; i < times.size(); ++i)
     {
-        checkGpuErrors(cudaEventElapsedTime(&times[i], events[i], events[i + 1]));
+        float millisecs;
+        checkGpuErrors(cudaEventElapsedTime(&millisecs, events[i], events[i + 1]));
         checkGpuErrors(cudaEventDestroy(events[i]));
+        times[i] = millisecs / 1000.0;
     }
 
-    printf("GPU times [s]: ");
-    for (auto t : times)
-        printf("%7.6fs ", t / 1000);
-    printf("\n");
-    printf("Gatom-step/s: ");
-    for (auto t : times)
-        printf("%7.6fs ", n / 1.0e6 / t);
-    printf("\n");
+    std::vector<double> gigaAtomSteps(times.size());
+    std::transform(times.begin(), times.end(), gigaAtomSteps.begin(), [&](auto t) { return n / 1.0e9 / t; });
 
-    unsigned long numFails = 0;
-    const auto isClose     = [](T a, T b)
+    const float meanTime = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+    const float meanGigaAtomSteps =
+        std::accumulate(gigaAtomSteps.begin(), gigaAtomSteps.end(), 0.0f) / gigaAtomSteps.size();
+
+    const float stdDevTime = std::sqrt(std::accumulate(times.begin(), times.end(), 0.0, [&](auto a, auto t)
+                                                       { return a + (t - meanTime) * (t - meanTime); }) /
+                                       (times.size() - 1));
+    const float stdDevGigaAtomSteps =
+        std::sqrt(std::accumulate(gigaAtomSteps.begin(), gigaAtomSteps.end(), 0.0, [&](auto a, auto s)
+                                  { return a + (s - meanGigaAtomSteps) * (s - meanGigaAtomSteps); }) /
+                  (gigaAtomSteps.size() - 1));
+
+    std::sort(times.begin(), times.end());
+    std::sort(gigaAtomSteps.begin(), gigaAtomSteps.end());
+
+    printf("GPU Time:    %7.6f +- %7.6f, median = %7.6f [s]\n", meanTime, stdDevTime, times[times.size() / 2]);
+    printf("Performance: %7.6f +- %7.6f, median = %7.6f [Giga Particle Updates / s]\n", meanGigaAtomSteps,
+           stdDevGigaAtomSteps, gigaAtomSteps[gigaAtomSteps.size() / 2]);
+
+    if (validate)
     {
-        constexpr bool isDouble = std::is_same_v<T, double>;
-        constexpr double atol   = isDouble ? 1e-6 : 1e-5;
-        constexpr double rtol   = isDouble ? 1e-5 : 1e-4;
-        return std::abs(a - b) <= atol + rtol * std::abs(b);
-    };
-    util::for_each_tuple(
-        [&](auto const& dOut, auto const& out)
+        unsigned long numFails = 0;
+        const auto isClose     = [](T a, T b)
         {
-            assert(dOut.size() == n && out.size() == n);
-#pragma omp parallel for
-            for (unsigned i = 0; i < n; ++i)
+            constexpr bool isDouble = std::is_same_v<T, double>;
+            constexpr double atol   = isDouble ? 1e-6 : 1e-5;
+            constexpr double rtol   = isDouble ? 1e-5 : 1e-4;
+            return std::abs(a - b) <= atol + rtol * std::abs(b);
+        };
+        util::for_each_tuple(
+            [&](auto const& dOut, auto const& out)
             {
-                if (!isClose(dOut[i], out[i]))
+                assert(dOut.size() == n && out.size() == n);
+#pragma omp parallel for
+                for (unsigned i = 0; i < n; ++i)
                 {
-                    unsigned long failNum;
-#pragma omp atomic capture
-                    failNum = numFails++;
-                    if (failNum < 10)
+                    if (!isClose(dOut[i], out[i]))
                     {
+                        unsigned long failNum;
+#pragma omp atomic capture
+                        failNum = numFails++;
+                        if (failNum < 10)
+                        {
 #pragma omp critical
-                        printf("FAIL %u: %.10f != %.10f\n", i, dOut[i], out[i]);
+                            printf("FAIL %u: %.10f != %.10f\n", i, dOut[i], out[i]);
+                        }
                     }
                 }
-            }
-        },
-        dOutputs, outputs);
-    if (numFails) printf("TOTAL FAILS: %lu\n", numFails);
+            },
+            dOutputs, outputs);
+        if (numFails) printf("TOTAL FAILS: %lu\n", numFails);
+    }
+
+    return times;
+}
+
+template<class Path, class T>
+void saveCsv(const Path& filename, const std::map<std::string, std::vector<T>>& data)
+{
+    if (data.empty()) throw std::runtime_error("ERROR writing CSV: no data passed!");
+    std::ofstream file(filename);
+    if (!file) throw std::runtime_error("ERROR writing CSV: could not open file for writing!");
+
+    std::size_t numRows = 0;
+    {
+        bool first = true;
+        for (const auto& [name, vec] : data)
+        {
+            if (first)
+                first = false;
+            else
+                file << ",";
+            file << name;
+            numRows = std::max(numRows, vec.size());
+        }
+    }
+    file << "\n";
+    for (std::size_t row = 0; row < numRows; ++row)
+    {
+        bool first = true;
+        for (const auto& [_, vec] : data)
+        {
+            if (first)
+                first = false;
+            else
+                file << ",";
+            if (row < vec.size()) file << vec[row];
+        }
+        file << "\n";
+    }
 }

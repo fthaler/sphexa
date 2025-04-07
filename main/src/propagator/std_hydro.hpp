@@ -50,6 +50,7 @@ class HydroProp : public Propagator<DomainType, DataType>
 {
 protected:
     using Base = Propagator<DomainType, DataType>;
+    using Base::pmReader;
     using Base::timer;
 
     using T             = typename DataType::RealType;
@@ -159,6 +160,7 @@ public:
     void computeForces(DomainType& domain, DataType& simData) override
     {
         timer.start();
+        pmReader.start();
 
         fullOrPartialSync(domain, simData);
 
@@ -166,7 +168,10 @@ public:
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 
-        domain.exchangeHalos(std::tie(get<"m">(d)), get<"ax">(d), get<"ay">(d));
+        //domain.exchangeHalos(std::tie(get<"m">(d)), get<"ax">(d), get<"ay">(d));
+        transferToHost(d, first, first + 1, {"m"});
+        fill(get<"m">(d), 0, first, d.m[first]);
+        fill(get<"m">(d), last, domain.nParticlesWithHalos(), d.m[first]);
 
         computeDensity(groups_.view(), d, domain.box());
         timer.step("Density");
@@ -193,6 +198,10 @@ public:
             timer.step("Upsweep");
             mHolder_.traverse(groups, d, domain);
             timer.step("Gravity");
+
+            auto stats = mHolder_.readStats();
+            timer.logStatistics("sumP2P", stats[0] / timer.getLastStepTime());
+            timer.logStatistics("sumM2P", stats[2] / timer.getLastStepTime());
         }
     }
 

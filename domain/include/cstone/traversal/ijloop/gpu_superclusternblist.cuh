@@ -1377,7 +1377,7 @@ struct GpuSuperclusterNbListNeighborhood
             nbList.neighborData.resize(requiredSize);
             runBuildKernel();
             checkGpuErrors(cudaDeviceSynchronize());
-            previousSize = requiredSize * 1.1;
+            previousSize = requiredSize * 1.5;
 #ifndef NDEBUG
             checkGpuErrors(cudaMemcpy(&requiredSize, &rawPtr(globalBuildData)->neighborDataSize,
                                       sizeof(unsigned long long), cudaMemcpyDeviceToHost));

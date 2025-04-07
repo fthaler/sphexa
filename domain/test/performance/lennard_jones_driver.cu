@@ -31,8 +31,11 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <format>
 #include <limits>
+#include <map>
 #include <tuple>
+#include <vector>
 
 #include "cstone/traversal/ijloop/gpu_alwaystraverse.cuh"
 #include "cstone/traversal/ijloop/gpu_clusternblist.cuh"
@@ -53,12 +56,19 @@ struct LjKernelFun
     operator()(ParticleData const& iData, ParticleData const& jData, cstone::Vec3<Tc> ijPosDiff, T distSq) const
     {
         using namespace cstone::ijloop;
-        const auto [i, iPos, hi] = iData;
-        const auto [j, jPos, hj] = jData;
-        const T r2inv            = T(1) / distSq;
-        const T r6inv            = r2inv * r2inv * r2inv;
-        const T forcelj          = r6inv * (lj1 * r6inv - lj2);
-        const T fpair            = i == j ? 0 : forcelj * r2inv;
+        const auto [i, iPos, hi, qi] = iData;
+        const auto [j, jPos, hj, qj] = jData;
+        const T r2                   = std::max(distSq, T(1e-1));
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        const T rinv                 = rsqrt(r2);
+#else
+        const T rinv                 = T(1) / std::sqrt(r2);
+#endif
+        const T r2inv                = rinv * rinv;
+        const T r6inv                = r2inv * r2inv * r2inv;
+        const T forcelj              = r6inv * (lj1 * r6inv - lj2) * r2inv;
+        const T forcecoul            = qi * qj * r2inv * rinv;
+        const T fpair                = i == j ? 0 : forcelj + forcecoul;
         return std::make_tuple(symmetric::odd(T(ijPosDiff[0]) * fpair), symmetric::odd(T(ijPosDiff[1]) * fpair),
                                symmetric::odd(T(ijPosDiff[2]) * fpair));
     }
@@ -71,44 +81,50 @@ void benchmarkMain()
 
     constexpr unsigned ngmax = 224;
 
-    constexpr unsigned nx = 200;
-    constexpr T h         = 1.9;
+    constexpr unsigned nx           = 100;
+    constexpr T h                   = 1.75;
+    constexpr float searchExtFactor = 1.9 / h;
 
-    FaceCenteredCubicCoordinates<Tc, StrongKeyType> coords(nx, nx, nx, {0, 1.6795962 * nx, BoundaryType::periodic});
+    FaceCenteredCubicCoordinates<Tc, StrongKeyType> coords(nx, nx, nx, {0, 1.6795962 * nx, BoundaryType::open});
 
     constexpr LjKernelFun<T> kernelFun{T(48), T(24)};
-    constexpr auto inputValues         = std::tuple();
+    constexpr auto inputValues         = std::tuple(T(12));
     constexpr auto initialOutputValues = std::tuple(
         std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::quiet_NaN());
+
+    std::map<std::string, std::vector<double>> times;
 
     const auto runBenchmark = [&](const char* name, auto const& neighborhood)
     {
         printf("--- %s ---\n", name);
-        benchmarkNeighborhood<Tc, T, StrongKeyType>(coords, neighborhood, h, ngmax, kernelFun, inputValues,
-                                                    initialOutputValues);
+        times[name] =
+            benchmarkNeighborhood<Tc, T, StrongKeyType>(coords, neighborhood, h, searchExtFactor, ngmax, kernelFun,
+                                                        inputValues, initialOutputValues, std::is_same_v<T, double>);
         printf("\n");
     };
 
-    runBenchmark("BATCHED DIRECT", ijloop::GpuAlwaysTraverseNeighborhood{ngmax});
-    runBenchmark("NAIVE TWO-STAGE", ijloop::GpuFullNbListNeighborhood{ngmax});
-    runBenchmark("GROMACS CLUSTERED TWO-STAGE", ijloop::GromacsLikeNeighborhood{ngmax});
+    runBenchmark("DIRECT TREE TRAVERSAL", ijloop::GpuAlwaysTraverseNeighborhood{ngmax});
+    runBenchmark("FULL NB LIST", ijloop::GpuFullNbListNeighborhood{ngmax});
+    runBenchmark("GROMACS SUPERCLUSTERED", ijloop::GromacsLikeNeighborhood{ngmax});
 
     using BaseClusterNb = ijloop::GpuClusterNbListNeighborhood<>::withNcMax<192>::withClusterSize<4, 4>;
-    runBenchmark("CLUSTERED TWO-STAGE", BaseClusterNb::withoutSymmetry::withoutCompression{});
-    runBenchmark("COMPRESSED CLUSTERED TWO-STAGE", BaseClusterNb::withoutSymmetry::withCompression<8>{});
+    runBenchmark("CLUSTERED", BaseClusterNb::withoutSymmetry::withoutCompression{});
+    runBenchmark("COMPRESSED CLUSTERED", BaseClusterNb::withoutSymmetry::withCompression<8>{});
 
     using SymmetricClusterNb = BaseClusterNb::withNcMax<128>::withSymmetry;
-    runBenchmark("CLUSTERED TWO-STAGE SYMMETRIC", SymmetricClusterNb::withoutCompression{});
-    runBenchmark("COMPRESSED CLUSTERED TWO-STAGE ", SymmetricClusterNb::withCompression<7>{});
+    runBenchmark("CLUSTERED SYMMETRIC", SymmetricClusterNb::withoutCompression{});
+    runBenchmark("COMPRESSED CLUSTERED", SymmetricClusterNb::withCompression<7>{});
 
     using BaseSuperclusterNb =
         ijloop::GpuSuperclusterNbListNeighborhood<>::withClusterSize<8, 8>::withSuperclusterSize<64>::withNcMax<1024>;
-    runBenchmark("SUPERCLUSTERED TWO-STAGE", BaseSuperclusterNb::withoutSymmetry::withoutCompression{});
-    runBenchmark("COMPRESSED SUPERCLUSTERED TWO-STAGE", BaseSuperclusterNb::withoutSymmetry::withCompression{});
+    runBenchmark("SUPERCLUSTERED", BaseSuperclusterNb::withoutSymmetry::withoutCompression{});
+    runBenchmark("COMPRESSED SUPERCLUSTERED", BaseSuperclusterNb::withoutSymmetry::withCompression{});
 
     using SymmetricSuperclusterNb = BaseSuperclusterNb::withNcMax<512>::withSymmetry;
-    runBenchmark("SUPERCLUSTERED TWO-STAGE SYMMETRIC", SymmetricSuperclusterNb::withoutCompression{});
-    runBenchmark("COMPRESSED SUPERCLUSTERED TWO-STAGE SYMMETRIC", SymmetricSuperclusterNb::withCompression{});
+    runBenchmark("SUPERCLUSTERED SYMMETRIC", SymmetricSuperclusterNb::withoutCompression{});
+    runBenchmark("COMPRESSED SUPERCLUSTERED SYMMETRIC", SymmetricSuperclusterNb::withCompression{});
+
+    saveCsv(std::format("lennard_jones_results_{}_{}.csv", typeid(Tc).name(), typeid(T).name()), times);
 }
 
 int main()

@@ -180,10 +180,12 @@ public:
 
         const auto [X, V] = computeParabolicOrbit(m_b, pos_b, r_periapsis, r0_per_periapsis, simData.hydro.g);
         displaceSystem(simData, X, V);
-        std::printf("Placed orbiter: \n");
-        std::printf("x: %lf, %lf, %lf\n", X[0], X[1], X[2]);
-        std::printf("v: %lf, %lf, %lf\n", V[0], V[1], V[2]);
-
+        if (rank == 0)
+        {
+            std::printf("Placed orbiter: \n");
+            std::printf("x: %lf, %lf, %lf\n", X[0], X[1], X[2]);
+            std::printf("v: %lf, %lf, %lf\n", V[0], V[1], V[2]);
+        }
         //***
 
         return globalBox;
@@ -200,7 +202,12 @@ public:
         auto t0 = std::chrono::high_resolution_clock::now();
         transferToDevice(d, 0, d.x.size(), {"x", "y", "z"});
         syncCoords<KeyType>(rank, numRanks, numParticlesGlobal, get<"x">(d), get<"y">(d), get<"z">(d), globalBox);
+        syncCoords<KeyType>(rank, numRanks, numParticlesGlobal, get<"x">(d), get<"y">(d), get<"z">(d), globalBox);
+        syncCoords<KeyType>(rank, numRanks, numParticlesGlobal, get<"x">(d), get<"y">(d), get<"z">(d), globalBox);
         transferToHost(d, 0, get<"x">(d).size(), {"x", "y", "z"});
+        d.x.shrink_to_fit();
+        d.y.shrink_to_fit();
+        d.z.shrink_to_fit();
         auto t1 = std::chrono::high_resolution_clock::now();
         if (rank == 0) std::cout << "earlySync " << std::chrono::duration<float>(t1 - t0).count() << std::endl;
 

@@ -137,7 +137,10 @@ public:
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 
-        domain.exchangeHalos(std::tie(get<"m">(d)), get<"ax">(d), get<"ay">(d));
+        //domain.exchangeHalos(std::tie(get<"m">(d)), get<"ax">(d), get<"ay">(d));
+        transferToHost(d, first, first + 1, {"m"});
+        fill(get<"m">(d), 0, first, d.m[first]);
+        fill(get<"m">(d), last, domain.nParticlesWithHalos(), d.m[first]);
 
         computeGroups(first, last, d, domain.box(), groups_);
         updateSmoothingLengthIterative(groups_.view(), d, domain.box());

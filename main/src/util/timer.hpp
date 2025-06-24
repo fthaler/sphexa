@@ -92,6 +92,16 @@ public:
             std::visit(writeField, item.second);
         }
 
+        for (const auto& item : perfStats)
+        {
+            if (item.second.empty()) { continue; }
+            ar->addStep(0, item.second.size(), outFile + ar->suffix());
+            ar->stepAttribute("numRanks", &numRanks, 1);
+            ar->stepAttribute("numIterations", &numStartCalled, 1);
+            ar->writeField(item.first, item.second.data(), item.second.size());
+            ar->closeStep();
+        }
+
         numStartCalled = 0;
     }
 

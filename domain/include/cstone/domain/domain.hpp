@@ -373,10 +373,12 @@ public:
     {
         auto ft = focusTree_.octreeViewAcc();
         return {ft.numLeafNodes,
+                ft.numNodes,
                 ft.prefixes,
                 ft.childOffsets,
                 ft.parents,
                 ft.internalToLeaf,
+                ft.leafToInternal,
                 ft.levelRange,
                 focusTree_.treeLeavesAcc().data(),
                 rawPtr(layoutAcc_),
@@ -427,14 +429,14 @@ private:
         constexpr auto smaller =
             std::make_tuple(util::FindIndex<ConservedVectors&, std::decay_t<decltype(tup)>, SmallerElementSize>{}...);
 
-        auto valueTypeCheck = [](auto index)
+        auto valueTypeCheck = [](auto m, auto s)
         {
             constexpr int numScratchBuffers = std::tuple_size_v<std::decay_t<decltype(tup)>>;
-            static_assert(get<0>(index) < numScratchBuffers || get<1>(index) < numScratchBuffers,
+            static_assert(m < numScratchBuffers || s < numScratchBuffers,
                           "one of the conserved fields has a value_type bigger than the value_types of available "
                           "scratch buffers");
         };
-        util::for_each_tuple(valueTypeCheck, util::zipTuples(matches, smaller));
+        util::for_each_tuple(valueTypeCheck, matches, smaller);
     }
 
     template<class Sorter, class KeyVec, class VectorX, class... Vectors1, class... Vectors2>

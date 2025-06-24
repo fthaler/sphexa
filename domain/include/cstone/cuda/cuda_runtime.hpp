@@ -47,9 +47,12 @@
 #define cudaMemcpyFromSymbol hipMemcpyFromSymbol
 #define cudaMemcpyHostToDevice hipMemcpyHostToDevice
 #define cudaMemcpyToSymbol hipMemcpyToSymbol
+#define cudaMemcpyToSymbolAsync hipMemcpyToSymbol // hipMemcpyToSymbolAsync does not exist
 #define cudaMemoryTypeDevice hipMemoryTypeDevice
 #define cudaMemoryTypeManaged hipMemoryTypeManaged
+#define cudaMemPrefetchAsync hipMemPrefetchAsync
 #define cudaMemset hipMemset
+#define cudaMemsetAsync hipMemsetAsync
 #define cudaPointerAttributes hipPointerAttribute_t
 #define cudaPointerGetAttributes hipPointerGetAttributes
 #define cudaSetDevice hipSetDevice
@@ -60,6 +63,8 @@
 #define cudaSuccess hipSuccess
 
 #define GPU_SYMBOL HIP_SYMBOL
+
+#define __grid_constant__
 
 #else
 

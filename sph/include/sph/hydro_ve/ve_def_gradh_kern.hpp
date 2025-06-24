@@ -31,62 +31,81 @@
 
 #pragma once
 
-#include "cstone/cuda/annotation.hpp"
-#include "cstone/sfc/box.hpp"
+#include "cstone/traversal/ijloop/ijloop.hpp"
 
-#include "sph/kernels.hpp"
 #include "sph/table_lookup.hpp"
 
 namespace sph
 {
 
-template<size_t stride = 1, class Tc, class Tm, class T>
-HOST_DEVICE_FUN inline util::tuple<T, T> veDefGradhJLoop(cstone::LocalIndex i, Tc K, const cstone::Box<Tc>& box,
-                                                         const cstone::LocalIndex* neighbors, unsigned neighborsCount,
-                                                         const Tc* x, const Tc* y, const Tc* z, const T* h, const Tm* m,
-                                                         const T* wh, const T* whd, const T* xm)
+template<class T>
+struct VeDefGradHInteraction
 {
-    auto xi     = x[i];
-    auto yi     = y[i];
-    auto zi     = z[i];
-    auto hi     = h[i];
-    auto mi     = m[i];
-    auto xmassi = xm[i];
+    const T *wh, *whd;
 
-    auto hInv  = T(1) / hi;
-    auto h3Inv = hInv * hInv * hInv;
-
-    // initialize with self-contribution
-    auto kxi      = xmassi;
-    auto whomegai = -T(3) * xmassi;
-    auto wrho0i   = -T(3) * mi;
-
-    for (unsigned pj = 0; pj < neighborsCount; ++pj)
+    template<class ParticleData, class Tc>
+    constexpr auto operator()(const ParticleData& iData, const ParticleData& jData, cstone::Vec3<Tc> const& /* r_ij */,
+                              T r2) const
     {
-        cstone::LocalIndex j = neighbors[stride * pj];
+        const auto [i, iPos, hi, mi, xmassi] = iData;
+        const auto [j, jPos, hj, mj, xmassj] = jData;
 
-        T dist   = distancePBC(box, hi, xi, yi, zi, x[j], y[j], z[j]);
-        T vloc   = dist * hInv;
-        T w      = lt::lookup(wh, vloc);
-        T dw     = lt::lookup(whd, vloc);
-        T dterh  = -(T(3) * w + vloc * dw);
-        T xmassj = xm[j];
+        auto hInv = T(1) / hi;
 
-        kxi += w * xmassj;
-        whomegai += dterh * xmassj;
-        wrho0i += dterh * m[j];
+        T dist  = std::sqrt(r2);
+        T vloc  = dist * hInv;
+        T w     = lt::lookup(wh, vloc);
+        T dw    = lt::lookup(whd, vloc);
+        T dterh = -(T(3) * w + vloc * dw);
+
+        T kxi      = w * xmassj;
+        T whomegai = dterh * xmassj;
+        T wrho0i   = dterh * mj;
+
+        return std::make_tuple(kxi, whomegai, wrho0i);
     }
+};
 
-    kxi *= K * h3Inv;
-    whomegai *= K * h3Inv * hInv;
-    wrho0i *= K * h3Inv * hInv;
+template<class T, class Tc>
+struct VeDefGradHPostamble
+{
+    Tc K;
 
-    whomegai = whomegai * mi / xmassi + (kxi - K * xmassi * h3Inv) * wrho0i;
-    T rhoi   = kxi * mi / xmassi;
-    T dhdrho = -hi / (rhoi * T(3)); // This /3 is the dimension hard-coded.
+    template<class ParticleData, class Result>
+    constexpr auto operator()(const ParticleData& iData, const Result& result) const
+    {
+        const auto [i, iPos, hi, mi, xmassi] = iData;
+        auto [kxi, whomegai, wrho0i]         = result;
 
-    T gradhi = T(1) - dhdrho * whomegai;
-    return {kxi, gradhi};
+        auto hInv  = T(1) / hi;
+        auto h3Inv = hInv * hInv * hInv;
+
+        kxi *= K * h3Inv;
+        whomegai *= K * h3Inv * hInv;
+        wrho0i *= K * h3Inv * hInv;
+
+        whomegai = whomegai * mi / xmassi + (kxi - K * xmassi * h3Inv) * wrho0i;
+        T rhoi   = kxi * mi / xmassi;
+        T dhdrho = -hi / (rhoi * T(3)); // This /3 is the dimension hard-coded.
+
+        T gradhi = T(1) - dhdrho * whomegai;
+#ifndef NDEBUG
+        if (std::isnan(rhoi))
+        {
+            printf("ERROR::Density(%zu) density %f, position: (%f %f %f), h: %f\n", size_t(i), rhoi, iPos[0], iPos[1],
+                   iPos[2], hi);
+        }
+#endif
+        return std::make_tuple(kxi, gradhi);
+    }
+};
+
+template<class Neighbordhood, class Tc, class Tm, class T>
+void veDefGradhIjLoop(const Neighbordhood& neighborhood, Tc K, const Tm* m, const T* xm, const T* wh, const T* whd,
+                      T* kx, T* gradh)
+{
+    neighborhood.ijLoop(std::make_tuple(m, xm), std::make_tuple(kx, gradh), VeDefGradHInteraction{wh, whd},
+                        VeDefGradHPostamble<T, Tc>{K});
 }
 
 } // namespace sph

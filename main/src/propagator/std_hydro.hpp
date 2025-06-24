@@ -74,7 +74,7 @@ protected:
 
     //! @brief the list of dependent particle fields, these may be used as scratch space during domain sync
     using DependentFields = FieldList<"rho", "p", "c", "ax", "ay", "az", "du", "c11", "c12", "c13", "c22", "c23", "c33",
-                                      "nc">;
+                                      "nc", "dtCourant">;
 
 public:
     HydroProp(std::ostream& output, size_t rank)
@@ -139,9 +139,9 @@ public:
 
         domain.exchangeHalos(std::tie(get<"m">(d)), get<"ax">(d), get<"ay">(d));
 
-        resizeNeighbors(d, domain.nParticles() * d.ngmax);
-        findNeighborsSfc(first, last, d, domain.box());
         computeGroups(first, last, d, domain.box(), groups_);
+        updateSmoothingLengthIterative(groups_.view(), d, domain.box());
+        findNeighborsSfc(groups_.view(), d, domain.box(), true);
         timer.step("FindNeighbors");
 
         computeDensity(groups_.view(), d, domain.box());

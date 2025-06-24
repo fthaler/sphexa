@@ -179,7 +179,7 @@ public:
         auto [exchangeStart, keyView] =
             distribute(sorter, particleKeys, x, y, z, std::tuple_cat(std::tie(h), particleProperties), scratch);
         // h is already reordered here for use in halo discovery
-        gatherArrays({sorter.getMap() + global_.o3start(bufDesc_), global_.numAssigned()}, 0, std::tie(h),
+        gatherArrays({sorter.getMap() + global_.postExchangeStart(bufDesc_), global_.numAssigned()}, 0, std::tie(h),
                      util::reverse(scratch));
 
         std::vector<int> peers = findPeersMac(myRank_, global_.assignment(), global_.octree(), box(), 1.0 / theta_);
@@ -199,8 +199,8 @@ public:
         focusTree_.computeLayout(layout_);
         halos_.exchangeRequests(focusTree_.treeLeaves(), focusTree_.assignment(), peers, layout_);
 
-        updateLayout(sorter, keyView, particleKeys, std::tie(h),
-                     std::tuple_cat(std::tie(x, y, z), particleProperties), scratch);
+        updateLayout(sorter, keyView, particleKeys, std::tie(h), std::tuple_cat(std::tie(x, y, z), particleProperties),
+                     scratch);
         setupHalos(particleKeys, x, y, z, h, scratch);
         firstCall_ = false;
     }
@@ -223,8 +223,8 @@ public:
 
         auto [exchangeStart, keyView] =
             distribute(sorter, particleKeys, x, y, z, std::tuple_cat(std::tie(h, m), particleProperties), scratch);
-        gatherArrays({sorter.getMap() + global_.o3start(bufDesc_), global_.numAssigned()}, 0, std::tie(x, y, z, h, m),
-                     util::reverse(scratch));
+        gatherArrays({sorter.getMap() + global_.postExchangeStart(bufDesc_), global_.numAssigned()}, 0,
+                     std::tie(x, y, z, h, m), util::reverse(scratch));
 
         float invThetaEff      = invThetaMinToVec(theta_);
         std::vector<int> peers = findPeersMac(myRank_, global_.assignment(), global_.octree(), box(), invThetaEff);
@@ -315,8 +315,7 @@ public:
         }
 
         std::apply([exDesc, ord, &sendBuffer, &receiveBuffer, this](auto&... a)
-                   { global_.redoExchange(exDesc, ord, sendBuffer, receiveBuffer, rawPtr(a)...); },
-                   arrays);
+                   { global_.redoExchange(exDesc, ord, sendBuffer, receiveBuffer, rawPtr(a)...); }, arrays);
 
         lowMemReallocate(bufDesc_.size, allocGrowthRate_, arrays, std::tie(sendBuffer, receiveBuffer));
         gatherArrays({ord + global_.numSendDown(), global_.numAssigned()}, bufDesc_.start, arrays,
@@ -354,6 +353,8 @@ public:
     //! @brief return the coordinate bounding box from the previous sync call
     const Box<T>& box() const { return global_.box(); }
 
+    KeyType assignmentStart() const { return global_.assignment()[myRank_]; }
+
     void setTreeConv(bool flag) { convergeTrees = flag; }
     void setHaloFactor(float factor) { haloSearchExt_ = factor; }
     void setGrowthAllocRate(float factor) { allocGrowthRate_ = factor; }
@@ -374,6 +375,7 @@ public:
         return {ft.numLeafNodes,
                 ft.prefixes,
                 ft.childOffsets,
+                ft.parents,
                 ft.internalToLeaf,
                 ft.levelRange,
                 focusTree_.treeLeavesAcc().data(),
@@ -526,7 +528,7 @@ private:
         util::for_each_tuple(relocate, orderedBuffers);
 
         // reorder the unordered buffers
-        gatherArrays({sorter.getMap() + global_.o3start(bufDesc_), global_.numAssigned()}, newBufDesc.start,
+        gatherArrays({sorter.getMap() + global_.postExchangeStart(bufDesc_), global_.numAssigned()}, newBufDesc.start,
                      unorderedBuffers, util::reverse(scratchBuffers));
 
         // newBufDesc is now the valid buffer description

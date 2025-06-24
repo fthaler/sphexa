@@ -206,7 +206,7 @@ void syncTreelets(std::span<const int> peers,
     exchangeRejectedKeys<KeyType>(peers, leaves, treelets, nodeOps);
     pruneTreelets<KeyType>(peers, treelets);
 
-    if (size_t(std::count(nodeOps.begin(), nodeOps.end(), 1)) != nodeOps.size())
+    if (std::count(nodeOps.begin(), nodeOps.end(), 1) != std::make_signed_t<size_t>(nodeOps.size()))
     {
         rebalanceTree(leaves, octree.prefixes, nodeOps.data());
         swap(leaves, octree.prefixes);

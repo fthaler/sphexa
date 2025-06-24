@@ -22,7 +22,7 @@ template<typename Thydro, typename T>
 extern void relaxSystemGPU(size_t first, size_t last, Thydro* ax, Thydro* ay, Thydro* az, Thydro* vx, Thydro* vy,
                            Thydro* vz, T relaxationTimescale);
 
-namespace cuda
+namespace gpu
 {
 
 template<class Dataset>
@@ -70,7 +70,7 @@ extern void computeIsothermalEOS_HydroStd(size_t firstParticle, size_t lastParti
 template<typename Dataset>
 extern void computePolytropicEOS_HydroStd(size_t firstParticle, size_t lastParticle, Dataset& d);
 
-} // namespace cuda
+} // namespace gpu
 
 template<class Tc, class Thydro, class Tm1, class Tdu>
 extern void driftPositionsGpu(const GroupView& grp, float dt, float dt_back,

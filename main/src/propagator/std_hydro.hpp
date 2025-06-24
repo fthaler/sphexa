@@ -50,6 +50,7 @@ class HydroProp : public Propagator<DomainType, DataType>
 {
 protected:
     using Base = Propagator<DomainType, DataType>;
+    using Base::pmReader;
     using Base::timer;
 
     using T             = typename DataType::RealType;
@@ -118,11 +119,15 @@ public:
                         std::tuple_cat(std::tie(get<"m">(d)), get<ConservedFields>(d)), get<DependentFields>(d));
         }
         d.treeView = domain.octreeProperties();
+        timer.logStatistics("numAssigned", domain.nParticles());
+        timer.logStatistics("numHalos", domain.nParticlesWithHalos() - domain.nParticles());
+        timer.logStatistics("assignment", domain.assignmentStart());
     }
 
     void computeForces(DomainType& domain, DataType& simData) override
     {
         timer.start();
+        pmReader.start();
 
         sync(domain, simData);
         timer.step("domain::sync");
@@ -164,6 +169,10 @@ public:
             timer.step("Upsweep");
             mHolder_.traverse(groups, d, domain);
             timer.step("Gravity");
+
+            auto stats = mHolder_.readStats();
+            timer.logStatistics("sumP2P", stats[0] / timer.getLastStepTime());
+            timer.logStatistics("sumM2P", stats[2] / timer.getLastStepTime());
         }
     }
 

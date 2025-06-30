@@ -65,6 +65,7 @@ protected:
 
     MHolder_t      mHolder_;
     GroupData<Acc> groups_;
+    int            treeUpdateInterval_ = 4, treeUpdateStep_ = 0;
 
     /*! @brief the list of conserved particles fields with values preserved between iterations
      *
@@ -105,7 +106,7 @@ public:
         std::apply([&d](auto... f) { d.devData.setDependent(f.value...); }, make_tuple(DependentFields{}));
     }
 
-    void sync(DomainType& domain, DataType& simData) override
+    void fullSync(DomainType& domain, DataType& simData) const
     {
         auto& d = simData.hydro;
         if (d.g != 0.0)
@@ -122,6 +123,28 @@ public:
         timer.logStatistics("numAssigned", domain.nParticles());
         timer.logStatistics("numHalos", domain.nParticlesWithHalos() - domain.nParticles());
         timer.logStatistics("assignment", domain.assignmentStart());
+    }
+
+    void partialSync(DomainType& domain, DataType& simData) const
+    {
+        auto& d = simData.hydro;
+        domain.exchangeHalos(get<"x", "y", "z", "h", "m">(d), get<"ax">(d), get<"ay">(d));
+        if (d.g != 0.0)
+        {
+            domain.updateExpansionCenters(get<"x">(d), get<"y">(d), get<"z">(d), get<"m">(d), get<"ax">(d),
+                                          get<"ay">(d));
+        }
+
+        //! @brief increase tree-cell search radius for each substep to account for particles drifting out of cells
+        d.treeView.searchExtFactor *= 1.012;
+    }
+
+    void sync(DomainType& domain, DataType& simData) override
+    {
+        if (treeUpdateStep_++ % treeUpdateInterval_ == 0)
+            fullSync(domain, simData);
+        else
+            partialSync(domain, simData);
     }
 
     void computeForces(DomainType& domain, DataType& simData) override

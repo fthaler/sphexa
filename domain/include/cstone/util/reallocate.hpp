@@ -26,6 +26,8 @@ void reallocate(Vector& vector, size_t size, double growthRate)
     if (size > current_capacity)
     {
         size_t reserve_size = double(size) * growthRate;
+        std::size_t pageAlign2MiB = (2 << 20) / sizeof(typename Vector::value_type);
+        reserve_size = ((reserve_size + pageAlign2MiB - 1) / pageAlign2MiB) * pageAlign2MiB;
         vector.reserve(reserve_size);
     }
     vector.resize(size);

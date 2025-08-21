@@ -738,7 +738,7 @@ public:
             util::packAllocBuffer(scratch, util::TypeList<Q, Q, Q, TreeNodeIndex, TreeNodeIndex, TreeNodeIndex>{},
                                   {numGlobalLeaves, size_t(globNumNodes_[myRank_]), size_t(gOctree.numNodes),
                                    size_t(globNumNodes_[myRank_]), numLetIdx, numLetIdx},
-                                  128);
+                                  2 << 20);
         populateGlobal<Q>(gOctree.leafSpan(), quantities, gLeafQLoc, gmap);
 
         //! exchange global leaves

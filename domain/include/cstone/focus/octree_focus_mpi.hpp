@@ -109,7 +109,7 @@ public:
         }
 
         KeyType focusStart = assignment[myRank_];
-        KeyType focusEnd   = assignment[myRank_ + 1];
+        KeyType focusEnd   = assignment.rangeEnd(myRank_);
         // init on first call
         if (prevFocusStart == 0 && prevFocusEnd == 0)
         {
@@ -479,7 +479,7 @@ public:
 
         // need to find again assignment start and end indices in focus tree because assignment might have changed
         TreeNodeIndex fAssignStart = findNodeAbove(rawPtr(leaves_), nNodes(leaves_), assignment[myRank_]);
-        TreeNodeIndex fAssignEnd   = findNodeAbove(rawPtr(leaves_), nNodes(leaves_), assignment[myRank_ + 1]);
+        TreeNodeIndex fAssignEnd   = findNodeAbove(rawPtr(leaves_), nNodes(leaves_), assignment.rangeEnd(myRank_));
 
         if constexpr (HaveGpu<Accelerator>{})
         {

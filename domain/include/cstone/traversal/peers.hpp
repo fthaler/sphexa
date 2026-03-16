@@ -51,7 +51,7 @@ std::vector<int> findPeersMac(int myRank,
                               float invThetaEff)
 {
     KeyType domainStart = assignment[myRank];
-    KeyType domainEnd   = assignment[myRank + 1];
+    KeyType domainEnd   = assignment.rangeEnd(myRank);
 
     int maxCoord   = 1u << maxTreeLevel<KeyType>{};
     float roundOff = 1 + 1e-6; // ensure that peers are picked up in case of a numerical tie
@@ -112,7 +112,7 @@ std::vector<int> findPeersMacStt(int myRank,
                                  float invThetaEff)
 {
     KeyType domainStart     = assignment[myRank];
-    KeyType domainEnd       = assignment[myRank + 1];
+    KeyType domainEnd       = assignment.rangeEnd(myRank);
     const KeyType* leaves   = octree.treeLeaves().data();
     TreeNodeIndex firstLeaf = findNodeAbove(leaves, octree.numLeafNodes(), domainStart);
     TreeNodeIndex lastLeaf  = findNodeAbove(leaves, octree.numLeafNodes(), domainEnd);

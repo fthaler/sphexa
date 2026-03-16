@@ -61,11 +61,13 @@ class SfcAssignment
 public:
     SfcAssignment()
         : rankBoundaries_(1)
+        , rangeEnds_(1)
     {
     }
 
     explicit SfcAssignment(int numRanks)
         : rankBoundaries_(numRanks + 1)
+        , rangeEnds_(numRanks)
         , counts_(numRanks)
         , numNodesPerRank_(numRanks)
         , treeOffsets_(numRanks + 1)
@@ -89,8 +91,12 @@ public:
         if (rank < int(counts_.size())) { counts_[rank] = count; }
     }
 
+    void setRangeEnd(int rank, KeyType end) { rangeEnds_[rank] = end; }
+
     [[nodiscard]] int numRanks() const { return int(rankBoundaries_.size()) - 1; }
     [[nodiscard]] KeyType operator[](int rank) const { return rankBoundaries_[rank]; }
+    //! @brief Returns the end of rank's SFC range (valid for both sorted and fixed assignments)
+    [[nodiscard]] KeyType rangeEnd(int rank) const { return rangeEnds_[rank]; }
     [[nodiscard]] LocalIndex totalCount(int rank) const { return counts_[rank]; }
 
     [[nodiscard]] int findRank(KeyType key) const
@@ -101,6 +107,8 @@ public:
 
 private:
     std::vector<KeyType> rankBoundaries_;
+    //! rangeEnds_[rank] = SFC end of rank's range (next sorted boundary above rankBoundaries_[rank])
+    std::vector<KeyType> rangeEnds_;
     std::vector<LocalIndex> counts_;
 
     //! number of assigned global tree nodes for each rank
@@ -108,6 +116,82 @@ private:
     //! scan of numTreeNodes
     std::vector<TreeNodeIndex> treeOffsets_;
 };
+
+/*! @brief Construct an SfcAssignment from a caller-supplied set of SFC rank boundaries.
+ *
+ * @tparam KeyType        32- or 64-bit unsigned integer
+ * @param[in] boundaries  Rank-indexed SFC key boundaries, length numRanks + 1.
+ *                        boundaries[rank] is the start of rank's SFC range.
+ *                        boundaries[numRanks] must equal nodeRange<KeyType>(0) (sentinel).
+ *                        The start of rank 0's range must be 0: the rank whose
+ *                        boundaries[rank] == 0 defines the lower end of the SFC.
+ *                        Boundaries are NOT required to be in sorted order; they will be
+ *                        sorted internally to build the spanning tree while preserving the
+ *                        rank-indexed association.
+ * @param[in] localCounts per-rank particle counts (localCounts[rank] for MPI rank rank).
+ * @param[out] spanningTree  the spanning octree leaves built from the sorted unique boundaries.
+ * @return                a fully populated SfcAssignment where:
+ *                          - assignment[rank]     == boundaries[rank]  (rank's SFC start)
+ *                          - treeOffsets[rank]    indexes the first global-tree leaf of rank
+ *                          - numNodesPerRank[rank] == number of global-tree leaves of rank
+ *
+ * The matching global tree (leaves) is returned through @p spanningTree and must be kept
+ * alive for FocusedOctree::updateTree / updateCounts.
+ */
+template<class KeyType>
+SfcAssignment<KeyType> makeFixedSfcAssignment(std::span<const KeyType> boundaries,
+                                              std::span<const LocalIndex> localCounts,
+                                              std::vector<KeyType>& spanningTree)
+{
+    int numRanks = static_cast<int>(boundaries.size()) - 1;
+    assert(boundaries.back() == nodeRange<KeyType>(0));
+
+    // Build a sorted copy of the boundaries (including sentinel) for computeSpanningTree.
+    // The first numRanks entries are the rank-start keys; sort them and prepend 0 / append
+    // nodeRange if they are not already at the front/back.
+    std::vector<KeyType> sortedBoundaries(boundaries.begin(), boundaries.end());
+    std::sort(sortedBoundaries.begin(), sortedBoundaries.end());
+    assert(sortedBoundaries.front() == KeyType(0));
+
+    spanningTree = computeSpanningTree<KeyType>(std::span<const KeyType>(sortedBoundaries));
+    // Number of leaves in the spanning tree (excluding the sentinel at the end)
+    TreeNodeIndex numLeaves = nNodes(spanningTree);
+
+    SfcAssignment<KeyType> ret(numRanks);
+
+    // Fill rankBoundaries and counts using rank-indexed (unsorted) boundaries.
+    for (int rank = 0; rank < numRanks; ++rank)
+    {
+        ret.set(rank, boundaries[rank], localCounts[rank]);
+    }
+    ret.set(numRanks, boundaries[numRanks], LocalIndex(0)); // sentinel
+
+    // Fill treeOffsets and numNodesPerRank.
+    // For each rank, the start of its SFC range is boundaries[rank] and the end is the
+    // smallest boundary value > boundaries[rank] (found in sortedBoundaries).
+    std::span<TreeNodeIndex> offsets        = ret.treeOffsets();
+    std::span<TreeNodeIndex> numNodesPerRnk = ret.numNodesPerRank();
+
+    for (int rank = 0; rank <= numRanks; ++rank)
+    {
+        offsets[rank] = TreeNodeIndex(std::lower_bound(spanningTree.begin(), spanningTree.end(), boundaries[rank]) -
+                                      spanningTree.begin());
+    }
+    for (int rank = 0; rank < numRanks; ++rank)
+    {
+        // Find the next boundary above boundaries[rank] in sorted order to get range end.
+        auto it          = std::upper_bound(sortedBoundaries.begin(), sortedBoundaries.end(), boundaries[rank]);
+        KeyType rangeEnd = (it != sortedBoundaries.end()) ? *it : nodeRange<KeyType>(0);
+        ret.setRangeEnd(rank, rangeEnd);
+        TreeNodeIndex endOffset =
+            TreeNodeIndex(std::lower_bound(spanningTree.begin(), spanningTree.end(), rangeEnd) - spanningTree.begin());
+        numNodesPerRnk[rank] = endOffset - offsets[rank];
+    }
+    // Verify the sentinel offset equals numLeaves
+    assert(offsets[numRanks] == numLeaves);
+
+    return ret;
+}
 
 template<class KeyType>
 SfcAssignment<KeyType> makeSfcAssignment(int numRanks, const std::vector<unsigned>& counts, const KeyType* tree)
@@ -121,6 +205,8 @@ SfcAssignment<KeyType> makeSfcAssignment(int numRanks, const std::vector<unsigne
     for (TreeNodeIndex i = 0; i < numRanks; ++i)
     {
         numNodesPerRank[i] = offsets[i + 1] - offsets[i];
+        // For sorted assignment, rank+1 boundary is the correct end of rank i's range.
+        ret.setRangeEnd(i, ret[i + 1]);
     }
 
     return ret;
@@ -148,7 +234,7 @@ void translateAssignment(const SfcAssignment<KeyType>& assignment,
     {
         // Note: start-end range is narrowed down if no exact match is found.
         TreeNodeIndex startIndex = findNodeAbove(focusTree.data(), focusTree.size(), assignment[rank]);
-        TreeNodeIndex endIndex   = findNodeBelow(focusTree.data(), focusTree.size(), assignment[rank + 1]);
+        TreeNodeIndex endIndex   = findNodeBelow(focusTree.data(), focusTree.size(), assignment.rangeEnd(rank));
 
         if (endIndex < startIndex) { endIndex = startIndex; }
         focusAssignment[rank] = TreeIndexPair(startIndex, endIndex);

@@ -88,6 +88,7 @@ public:
     void set(int rank, KeyType a, LocalIndex count)
     {
         rankBoundaries_[rank] = a;
+        if (rank > 0 && rank <= int(rangeEnds_.size())) { rangeEnds_[rank - 1] = a; }
         if (rank < int(counts_.size())) { counts_[rank] = count; }
     }
 

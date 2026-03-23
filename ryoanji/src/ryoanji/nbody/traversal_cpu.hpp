@@ -19,6 +19,7 @@
 #include "cstone/traversal/macs.hpp"
 #include "cstone/focus/source_center.hpp"
 #include "cartesian_qpole.hpp"
+#include "rtfmm_mpole.hpp"
 #include "kernel.hpp"
 
 namespace ryoanji

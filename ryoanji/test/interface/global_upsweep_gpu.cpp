@@ -24,11 +24,12 @@
 
 #include "ryoanji/interface/global_multipole.hpp"
 #include "ryoanji/interface/multipole_holder.cuh"
+#include "ryoanji/nbody/rtfmm_mpole.hpp"
 
 using namespace ryoanji;
 
 template<class T, class KeyType, class MultipoleType>
-static int multipoleHolderTest(int thisRank, int numRanks)
+static bool multipoleHolderTest(int thisRank, int numRanks)
 {
     const LocalIndex numParticles    = 1000 * numRanks;
     unsigned         bucketSize      = 64;
@@ -105,6 +106,7 @@ static int multipoleHolderTest(int thisRank, int numRanks)
         std::cout << "Upsweep test result: " << testResult << std::endl;
     }
 
+    return passMultipole;
     if (passMultipole) { return EXIT_SUCCESS; }
     else
     {
@@ -120,9 +122,11 @@ int main(int argc, char** argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
 
-    int testResult = multipoleHolderTest<double, uint64_t, CartesianQuadrupole<double>>(rank, numRanks);
+    bool quadrupoleTestResult = multipoleHolderTest<double, uint64_t, CartesianQuadrupole<double>>(rank, numRanks);
+    bool rtfmmTestResult =
+        multipoleHolderTest<double, uint64_t, RtfmmMultipole<double, ryoanji::rtfmmSurfacePoints(5)>>(rank, numRanks);
 
     MPI_Finalize();
 
-    return testResult;
+    return quadrupoleTestResult && rtfmmTestResult ? EXIT_SUCCESS : EXIT_FAILURE;
 }

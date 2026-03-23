@@ -18,6 +18,7 @@
 #include "cstone/primitives/warpscan.cuh"
 
 #include "ryoanji/nbody/cartesian_qpole.hpp"
+#include "ryoanji/nbody/rtfmm_mpole.hpp"
 #include "ryoanji/nbody/kernel.hpp"
 
 #include "upsweep_gpu.h"
@@ -65,9 +66,9 @@ void computeLeafMultipoles(const Tc* x, const Tc* y, const Tc* z, const Tm* m, c
                            TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec4<Tf>* centers,
                            MType* multipoles)
 {
-    constexpr int numThreads = UpsweepConfig::numThreads;
+    constexpr int numThreads     = UpsweepConfig::numThreads;
     constexpr int threadsPerLeaf = 8;
-    int numBlocks = cstone::iceil(threadsPerLeaf * numLeaves, numThreads);
+    int           numBlocks      = cstone::iceil(threadsPerLeaf * numLeaves, numThreads);
 
     if (numBlocks)
     {
@@ -139,7 +140,17 @@ void upsweepMultipoles(TreeNodeIndex firstCell, TreeNodeIndex lastCell, const Tr
     UPSWEEP_MULTIPOLES(double, MType<float>);                                                                          \
     UPSWEEP_MULTIPOLES(float, MType<float>);
 
+#define ARG(...) __VA_ARGS__
+#define INSTANTIATE_MULTIPOLEA(MType, ...)                                                                             \
+    COMPUTE_LEAF_MULTIPOLES(double, double, double, ARG(MType<double, __VA_ARGS__>));                                  \
+    COMPUTE_LEAF_MULTIPOLES(double, float, double, ARG(MType<float, __VA_ARGS__>));                                    \
+    COMPUTE_LEAF_MULTIPOLES(float, float, float, ARG(MType<float, __VA_ARGS__>));                                      \
+    UPSWEEP_MULTIPOLES(double, ARG(MType<double, __VA_ARGS__>));                                                       \
+    UPSWEEP_MULTIPOLES(double, ARG(MType<float, __VA_ARGS__>));                                                        \
+    UPSWEEP_MULTIPOLES(float, ARG(MType<float, __VA_ARGS__>));
+
 INSTANTIATE_MULTIPOLE(CartesianQuadrupole)
 INSTANTIATE_MULTIPOLE(CartesianMDQpole)
+INSTANTIATE_MULTIPOLEA(RtfmmMultipole, rtfmmSurfacePoints(5))
 
 } // namespace ryoanji

@@ -17,6 +17,7 @@
 #include "cstone/traversal/groups_gpu.h"
 #include "cstone/util/reallocate.hpp"
 #include "ryoanji/nbody/cartesian_qpole.hpp"
+#include "ryoanji/nbody/rtfmm_mpole.hpp"
 #include "ryoanji/nbody/direct.cuh"
 #include "ryoanji/nbody/upsweep_gpu.h"
 #include "ryoanji/nbody/upsweep_cpu.hpp"
@@ -203,8 +204,15 @@ const MType* MultipoleHolder<Tc, Th, Tm, Ta, Tf, KeyType, MType>::deviceMultipol
     MHOLDER_MTYPE(double, float, float, float, double, uint64_t, MType<float>);                                        \
     MHOLDER_MTYPE(float, float, float, float, float, uint64_t, MType<float>);
 
+#define ARG(...) __VA_ARGS__
+#define MHOLDERA(MType, ...)                                                                                           \
+    MHOLDER_MTYPE(double, double, double, double, double, uint64_t, ARG(MType<double, __VA_ARGS__>));                  \
+    MHOLDER_MTYPE(double, float, float, float, double, uint64_t, ARG(MType<float, __VA_ARGS__>));                      \
+    MHOLDER_MTYPE(float, float, float, float, float, uint64_t, ARG(MType<float, __VA_ARGS__>));
+
 MHOLDER(CartesianQuadrupole)
 MHOLDER(CartesianMDQpole)
+MHOLDERA(RtfmmMultipole, rtfmmSurfacePoints(5))
 
 #define DIRECT_SUM(T)                                                                                                  \
     template void directSum(size_t, size_t, size_t, Vec3<T>, int, const T*, const T*, const T*, const T*, const T*,    \

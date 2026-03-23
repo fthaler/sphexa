@@ -18,6 +18,7 @@
 #include "cstone/primitives/math.hpp"
 #include "cstone/primitives/warpscan.cuh"
 #include "cartesian_qpole.hpp"
+#include "rtfmm_mpole.hpp"
 #include "kernel.hpp"
 #include "traversal_gpu.h"
 
@@ -564,9 +565,9 @@ double traverse(cstone::GroupView grp, const int initNodeIdx, const Tc* __restri
 
     resetTraversalCounters<<<1, 1>>>();
     if (numBlocks > 0)
-    traverseKernel<<<numBlocks, TravConfig::numThreads>>>(grp, initNodeIdx, xt, yt, zt, mt, ht, xs, ys, zs, ms, hs,
-                                                          childOffsets, internalToLeaf, layout, sourceCenter,
-                                                          multipoles, G, numShells, boxL, p, ax, ay, az, gmPool);
+        traverseKernel<<<numBlocks, TravConfig::numThreads>>>(grp, initNodeIdx, xt, yt, zt, mt, ht, xs, ys, zs, ms, hs,
+                                                              childOffsets, internalToLeaf, layout, sourceCenter,
+                                                              multipoles, G, numShells, boxL, p, ax, ay, az, gmPool);
     float totalPotential;
     checkGpuErrors(cudaMemcpyFromSymbol(&totalPotential, GPU_SYMBOL(totalPotentialGlob), sizeof(float)));
     return 0.5 * Tc(G) * totalPotential;
@@ -587,8 +588,15 @@ double traverse(cstone::GroupView grp, const int initNodeIdx, const Tc* __restri
     TRAVERSE(double, float, float, float, double, MType<float>);                                                       \
     TRAVERSE(float, float, float, float, float, MType<float>);
 
+#define ARG(...) __VA_ARGS__
+#define TRAVERSE_MPOLEA(MType, ...)                                                                                    \
+    TRAVERSE(double, double, double, double, double, ARG(MType<double, __VA_ARGS__>));                                 \
+    TRAVERSE(double, float, float, float, double, ARG(MType<float, __VA_ARGS__>));                                     \
+    TRAVERSE(float, float, float, float, float, ARG(MType<float, __VA_ARGS__>));
+
 TRAVERSE_MPOLE(CartesianQuadrupole)
 TRAVERSE_MPOLE(CartesianMDQpole)
+TRAVERSE_MPOLEA(RtfmmMultipole, rtfmmSurfacePoints(5))
 
 int bhMaxTargetSize() { return TravConfig::targetSize; }
 

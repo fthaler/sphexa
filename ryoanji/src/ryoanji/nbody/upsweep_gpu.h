@@ -21,9 +21,9 @@
 namespace ryoanji
 {
 
-template<class Tc, class Tm, class Tf, class MType>
+template<class Tc, class Tm, class Tf, class KeyType, class MType>
 extern void computeLeafMultipoles(const Tc* x, const Tc* y, const Tc* z, const Tm* m,
-                                  const TreeNodeIndex* leafToInternal, TreeNodeIndex numLeaves,
+                                  const TreeNodeIndex* leafToInternal, const KeyType* leaves, TreeNodeIndex numLeaves,
                                   const LocalIndex* layout, const Vec4<Tf>* centers, MType* multipoles);
 
 /*! @brief perform multipole upward sweep for one tree level

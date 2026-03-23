@@ -14,6 +14,7 @@
  */
 
 #include "cstone/cuda/cuda_runtime.hpp"
+#include "cstone/sfc/common.hpp"
 #include "cstone/primitives/math.hpp"
 #include "cstone/primitives/warpscan.cuh"
 
@@ -31,10 +32,11 @@ struct UpsweepConfig
     static constexpr int numThreads = 256;
 };
 
-template<int TPL, class Tc, class Tm, class Tf, class MType>
+template<int TPL, class Tc, class Tm, class Tf, class KeyType, class MType>
 __global__ void computeLeafMultipolesKernel(const Tc* x, const Tc* y, const Tc* z, const Tm* m,
-                                            const TreeNodeIndex* leafToInternal, TreeNodeIndex numLeaves,
-                                            const LocalIndex* layout, const Vec4<Tf>* centers, MType* multipoles)
+                                            const TreeNodeIndex* leafToInternal, const KeyType* leaves,
+                                            TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec4<Tf>* centers,
+                                            MType* multipoles)
 {
     TreeNodeIndex tid     = blockIdx.x * blockDim.x + threadIdx.x;
     TreeNodeIndex leafIdx = tid / TPL;
@@ -44,8 +46,9 @@ __global__ void computeLeafMultipolesKernel(const Tc* x, const Tc* y, const Tc* 
     mp_loc = 0;
     if (leafIdx < numLeaves)
     {
-        internalIdx = leafToInternal[leafIdx];
-        auto com    = centers[internalIdx];
+        internalIdx    = leafToInternal[leafIdx];
+        auto     com   = centers[internalIdx];
+        unsigned level = cstone::treeLevel(leaves[leafIdx + 1] - leaves[leafIdx]);
         P2M_add<TPL>(x, y, z, m, layout[leafIdx] + threadIdx.x % TPL, layout[leafIdx + 1], com, mp_loc);
     }
 
@@ -61,10 +64,10 @@ __global__ void computeLeafMultipolesKernel(const Tc* x, const Tc* y, const Tc* 
     if (tid % TPL == 0 && leafIdx < numLeaves) { multipoles[internalIdx] = P2M_finalize(mp_loc); }
 }
 
-template<class Tc, class Tm, class Tf, class MType>
+template<class Tc, class Tm, class Tf, class KeyType, class MType>
 void computeLeafMultipoles(const Tc* x, const Tc* y, const Tc* z, const Tm* m, const TreeNodeIndex* leafToInternal,
-                           TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec4<Tf>* centers,
-                           MType* multipoles)
+                           const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout,
+                           const Vec4<Tf>* centers, MType* multipoles)
 {
     constexpr int numThreads     = UpsweepConfig::numThreads;
     constexpr int threadsPerLeaf = 8;
@@ -73,14 +76,19 @@ void computeLeafMultipoles(const Tc* x, const Tc* y, const Tc* z, const Tm* m, c
     if (numBlocks)
     {
         computeLeafMultipolesKernel<threadsPerLeaf>
-            <<<numBlocks, numThreads>>>(x, y, z, m, leafToInternal, numLeaves, layout, centers, multipoles);
+            <<<numBlocks, numThreads>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, centers, multipoles);
     }
 }
 
 #define COMPUTE_LEAF_MULTIPOLES(Tc, Tm, Tf, MType)                                                                     \
     template void computeLeafMultipoles(const Tc* x, const Tc* y, const Tc* z, const Tm* m,                            \
-                                        const TreeNodeIndex* leafToInternal, TreeNodeIndex numLeaves,                  \
-                                        const LocalIndex* layout, const Vec4<Tf>* centers, MType* multipoles)
+                                        const TreeNodeIndex* leafToInternal, const unsigned* leaves,                   \
+                                        TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec4<Tf>* centers,    \
+                                        MType* multipoles);                                                            \
+    template void computeLeafMultipoles(const Tc* x, const Tc* y, const Tc* z, const Tm* m,                            \
+                                        const TreeNodeIndex* leafToInternal, const unsigned long* leaves,              \
+                                        TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec4<Tf>* centers,    \
+                                        MType* multipoles);
 
 template<class T, class MType>
 __global__ void upsweepMultipolesKernel(TreeNodeIndex firstCell, TreeNodeIndex lastCell,

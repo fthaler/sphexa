@@ -38,15 +38,16 @@ namespace ryoanji
  * @param[in]  centers        expansion (com) center of each tree cell, length = numTreeNodes
  * @param[out] multipoles     output multipole moments , length = numTreeNodes
  */
-template<class T1, class T2, class MType>
+template<class T1, class T2, class KeyType, class MType>
 void computeLeafMultipoles(const T1* x, const T1* y, const T1* z, const T2* m,
-                           std::span<const cstone::TreeNodeIndex> leafToInternal, const LocalIndex* layout,
-                           const cstone::SourceCenterType<T1>* centers, MType* multipoles)
+                           std::span<const cstone::TreeNodeIndex> leafToInternal, const KeyType* leaves,
+                           const LocalIndex* layout, const cstone::SourceCenterType<T1>* centers, MType* multipoles)
 {
 #pragma omp parallel for schedule(static)
     for (size_t leafIdx = 0; leafIdx < leafToInternal.size(); ++leafIdx)
     {
-        TreeNodeIndex i = leafToInternal[leafIdx];
+        TreeNodeIndex i     = leafToInternal[leafIdx];
+        unsigned      level = cstone::treeLevel(leaves[leafIdx + 1] - leaves[leafIdx]);
         P2M(x, y, z, m, layout[leafIdx], layout[leafIdx + 1], centers[i], multipoles[i]);
     }
 }

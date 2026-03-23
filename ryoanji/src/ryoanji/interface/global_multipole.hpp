@@ -32,9 +32,11 @@ void computeMultipoles(const Tc* x, const Tc* y, const Tc* z, const Tm* m, cston
     auto let           = focusTree.octreeViewAcc(); // locally essential octree
     auto centers       = focusTree.expansionCentersAcc();
     auto globalCenters = focusTree.globalExpansionCenters();
+    auto leaves        = focusTree.treeLeavesAcc();
 
     std::span multipoleSpan{multipoles, size_t(let.numNodes)};
-    ryoanji::computeLeafMultipoles(x, y, z, m, let.leafToInternalSpan(), layout, centers.data(), multipoles);
+    ryoanji::computeLeafMultipoles(x, y, z, m, let.leafToInternalSpan(), leaves.data(), layout, centers.data(),
+                                   multipoles);
 
     auto upsweep = [](auto levelRange, auto childOffsets, auto M, auto centers)
     { ryoanji::upsweepMultipoles(levelRange, childOffsets, centers, M); };

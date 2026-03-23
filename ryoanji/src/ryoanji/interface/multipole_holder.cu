@@ -59,11 +59,12 @@ public:
 
         auto globalCenters = focusTree.globalExpansionCenters();
 
-        layout_  = layout;
-        centers_ = focusTree.expansionCentersAcc().data();
+        layout_     = layout;
+        centers_    = focusTree.expansionCentersAcc().data();
+        auto leaves = focusTree.treeLeavesAcc().data();
 
-        computeLeafMultipoles(x, y, z, m, octree_.leafToInternal + octree_.numInternalNodes, octree_.numLeafNodes,
-                              layout_, centers_, rawPtr(multipoles_));
+        computeLeafMultipoles(x, y, z, m, octree_.leafToInternal + octree_.numInternalNodes, leaves,
+                              octree_.numLeafNodes, layout_, centers_, rawPtr(multipoles_));
 
         auto upsweepGpu = [](auto levelRange, auto childOffsets, auto M, auto centers)
         {

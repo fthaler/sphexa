@@ -57,6 +57,7 @@ if(SPH_EXA_WITH_CUDA)
         message(STATUS "No CUDA support")
         set(SPH_EXA_WITH_CUDA OFF)
     endif()
+    set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 endif()
 
 if(SPH_EXA_WITH_HIP)

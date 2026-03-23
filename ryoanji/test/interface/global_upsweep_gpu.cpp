@@ -123,6 +123,8 @@ int main(int argc, char** argv)
     MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
 
     bool quadrupoleTestResult = multipoleHolderTest<double, uint64_t, CartesianQuadrupole<double>>(rank, numRanks);
+
+    rtfmmInit<double, double, 5>(1.0);
     bool rtfmmTestResult =
         multipoleHolderTest<double, uint64_t, RtfmmMultipole<double, ryoanji::rtfmmSurfacePoints(5)>>(rank, numRanks);
 

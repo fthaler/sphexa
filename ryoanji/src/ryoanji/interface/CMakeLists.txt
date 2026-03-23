@@ -17,6 +17,8 @@ if(CMAKE_CUDA_COMPILER OR CMAKE_HIP_COMPILER)
     target_include_directories(ryoanji_obj PUBLIC ${PROJECT_SOURCE_DIR}/src ${MPI_CXX_INCLUDE_PATH})
     add_library(ryoanji $<TARGET_OBJECTS:ryoanji_obj> $<TARGET_OBJECTS:ryoanji_kernels>)
     target_link_libraries(ryoanji PUBLIC cstone_gpu ${MPI_CXX_LIBRARIES})
+    target_link_libraries(ryoanji PUBLIC BLAS::BLAS LAPACK::LAPACK)
+    target_include_directories(ryoanji PRIVATE ${BLAS_INCLUDE_DIR})
 endif()
 
 if (CMAKE_HIP_COMPILER)

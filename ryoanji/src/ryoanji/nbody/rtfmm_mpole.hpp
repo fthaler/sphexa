@@ -78,6 +78,29 @@ HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m,
 template<class T, unsigned S>
 HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)
 {
+#ifdef __CUDA_ARCH__
+    const GlobalData<T, T, S>* data = reinterpret_cast<const GlobalData<T, T, S>*>(globalDataDevice);
+#else
+    const GlobalData<T, T, S>* data = reinterpret_cast<const GlobalData<T, T, S>*>(globalData);
+#endif
+
+    RtfmmMultipole<T, S> tmp;
+    for (unsigned i = 0; i < S; ++i)
+    {
+        T tmpi = 0;
+        for (unsigned j = 0; j < S; ++j)
+            tmpi += data->uT[i * S + j] * gv[j];
+        tmp[i] = tmpi;
+    }
+
+    for (unsigned i = 0; i < S; ++i)
+    {
+        T gvi = 0;
+        for (unsigned j = 0; j < S; ++j)
+            gvi += data->vSinv[i * S + j] * tmp[j];
+        gv[i] = gvi;
+    }
+
     return gv;
 }
 

@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "cstone/cuda/annotation.hpp"
 
 namespace detail

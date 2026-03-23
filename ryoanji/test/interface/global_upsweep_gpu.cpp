@@ -27,10 +27,9 @@
 
 using namespace ryoanji;
 
-template<class T, class KeyType>
+template<class T, class KeyType, class MultipoleType>
 static int multipoleHolderTest(int thisRank, int numRanks)
 {
-    using MultipoleType              = CartesianQuadrupole<T>;
     const LocalIndex numParticles    = 1000 * numRanks;
     unsigned         bucketSize      = 64;
     unsigned         bucketSizeLocal = 16;
@@ -107,7 +106,10 @@ static int multipoleHolderTest(int thisRank, int numRanks)
     }
 
     if (passMultipole) { return EXIT_SUCCESS; }
-    else { return EXIT_FAILURE; }
+    else
+    {
+        return EXIT_FAILURE;
+    }
 }
 
 int main(int argc, char** argv)
@@ -118,7 +120,7 @@ int main(int argc, char** argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
 
-    int testResult = multipoleHolderTest<double, uint64_t>(rank, numRanks);
+    int testResult = multipoleHolderTest<double, uint64_t, CartesianQuadrupole<double>>(rank, numRanks);
 
     MPI_Finalize();
 

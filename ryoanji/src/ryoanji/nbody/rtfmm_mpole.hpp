@@ -117,6 +117,7 @@ template<class Ta, class Tc, class Tmp, unsigned S>
 HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target, const Vec3<Tc>& center,
                                            const RtfmmMultipole<Tmp, S>& multipole)
 {
+    assert(false && "Currently not doing anything useful");
     return {};
 }
 

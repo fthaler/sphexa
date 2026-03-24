@@ -26,6 +26,7 @@ struct GlobalData
     Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
     T  uT[S * S], vSinv[S * S];
     T  m2m[8][S * S];
+    T  r0;
 };
 
 extern void* globalData;
@@ -42,14 +43,14 @@ template<int stride, class T1, class T2, class T3, unsigned S>
 HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
                              unsigned level, const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)
 {
-    T2 scale  = T2(1) / (1 << level);
-    T2 scaleR = T2(2.95) / (1 << level); // TODO: times r0
-
 #ifdef __CUDA_ARCH__
     const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
 #else
     const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalData);
 #endif
+
+    T2 scale  = T2(1) / (1 << level);
+    T2 scaleR = T2(2.95) / (1 << level) * data->r0;
 
     for (int j = 0; j < S; ++j)
     {

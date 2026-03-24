@@ -270,6 +270,7 @@ void rtfmmInit(Tc r0)
     globalData                        = new GlobalData<Tc, T, S>();
     GlobalData<Tc, T, S>* globalDataT = reinterpret_cast<GlobalData<Tc, T, S>*>(globalData);
 
+    globalDataT->r0 = r0;
     initSurfacePoints<Tc, T, P>(globalDataT);
     initMatrices<Tc, T, P>(globalDataT, r0);
 

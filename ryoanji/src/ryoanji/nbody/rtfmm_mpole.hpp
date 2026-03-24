@@ -132,7 +132,7 @@ HOST_DEVICE_FUN void addQuadrupole(RtfmmMultipole<T, S>& composite, Vec3<Tc> dX,
     const GlobalData<Tc, T, S>* data = reinterpret_cast<const GlobalData<Tc, T, S>*>(globalData);
 #endif
 
-    const unsigned octant = unsigned(dX[0] > 0) | (unsigned(dX[1] > 0) << 1) | (unsigned(dX[2] > 0) << 2);
+    const unsigned octant = unsigned(dX[2] < 0) | (unsigned(dX[1] < 0) << 1) | (unsigned(dX[0] < 0) << 2);
     const T*       m2m    = data->m2m[octant];
 
     for (unsigned i = 0; i < S; ++i)

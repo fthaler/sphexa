@@ -191,9 +191,45 @@ std::vector<T> matMatMul(int m, int k, int n, const std::vector<T>& A, const std
     return C;
 }
 
+template<class T>
+cstone::Vec3<T> getChildCellX(const cstone::Vec3<T>& xPar, T rPar, int octant, bool isPeriodic)
+{
+    cstone::Vec3<T> x;
+    if (!isPeriodic)
+    {
+        assert(octant >= 0 && octant <= 7 && "octant out of range");
+        if (octant == 0)
+            x = xPar + cstone::Vec3<T>{-rPar / 2, -rPar / 2, -rPar / 2};
+        else if (octant == 1)
+            x = xPar + cstone::Vec3<T>{-rPar / 2, -rPar / 2, rPar / 2};
+        else if (octant == 2)
+            x = xPar + cstone::Vec3<T>{-rPar / 2, rPar / 2, -rPar / 2};
+        else if (octant == 3)
+            x = xPar + cstone::Vec3<T>{-rPar / 2, rPar / 2, rPar / 2};
+        else if (octant == 4)
+            x = xPar + cstone::Vec3<T>{rPar / 2, -rPar / 2, -rPar / 2};
+        else if (octant == 5)
+            x = xPar + cstone::Vec3<T>{rPar / 2, -rPar / 2, rPar / 2};
+        else if (octant == 6)
+            x = xPar + cstone::Vec3<T>{rPar / 2, rPar / 2, -rPar / 2};
+        else if (octant == 7)
+            x = xPar + cstone::Vec3<T>{rPar / 2, rPar / 2, rPar / 2};
+    }
+    else
+    {
+        assert(octant >= 0 && octant <= 26 && "periodic octant out of range");
+        int k = octant / 9 - 1;
+        int j = (octant % 9) / 3 - 1;
+        int i = (octant % 3) - 1;
+        x     = xPar + cstone::Vec3<T>{T(i), T(j), T(k)} * (rPar * 2 / 3.0);
+    }
+    return x;
+}
+
 template<class Tc, class T, unsigned P, unsigned S = rtfmmSurfacePoints(P)>
 void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
 {
+    /* P2M */
     std::vector<cstone::Vec3<Tc>> xCheckUp = getSurfacePoints(P, r0 * 2.95);
     std::vector<cstone::Vec3<Tc>> xEquivUp = getSurfacePoints(P, r0 * 1.05);
     auto [e2cUpPrecompute, m, n]           = getP2pMatrix(xEquivUp, xCheckUp);
@@ -208,6 +244,23 @@ void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
     assert(S == n);
     std::copy_n(utP2mPrecompute.data(), S * S, globalData->uT);
     std::copy_n(vsinvP2mPrecompute.data(), S * S, globalData->vSinv);
+
+    /* M2M */
+    const auto& xCheckUpParent     = xCheckUp;
+    const auto& utM2mPrecompute    = utP2mPrecompute;
+    const auto& vsinvM2mPrecompute = vsinvP2mPrecompute;
+
+    for (int octant = 0; octant < 8; octant++)
+    {
+        cstone::Vec3<Tc>              offsetChild   = getChildCellX({0, 0, 0}, r0, octant, false);
+        std::vector<cstone::Vec3<Tc>> xEquivChildUp = getSurfacePoints(P, r0 / 2 * 1.05, offsetChild);
+        auto [ce2pcUpPrecompute, mm, nn]            = getP2pMatrix(xEquivChildUp, xCheckUpParent);
+        assert(S == mm);
+        assert(S == nn);
+        auto m1  = matMatMul(m, m, nn, utM2mPrecompute, ce2pcUpPrecompute);
+        auto m2m = matMatMul(n, m, nn, vsinvM2mPrecompute, m1);
+        std::copy_n(m2m.data(), S * S, globalData->m2m[octant]);
+    }
 }
 
 template<class Tc, class T, unsigned P>

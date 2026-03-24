@@ -25,6 +25,7 @@ struct GlobalData
 {
     Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
     T  uT[S * S], vSinv[S * S];
+    T  m2m[8][S * S];
 };
 
 extern void* globalData;
@@ -124,6 +125,22 @@ HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target,
 template<class T, unsigned S, class Tc>
 HOST_DEVICE_FUN void addQuadrupole(RtfmmMultipole<T, S>& composite, Vec3<Tc> dX, const RtfmmMultipole<T, S>& addend)
 {
+#ifdef __CUDA_ARCH__
+    const GlobalData<Tc, T, S>* data = reinterpret_cast<const GlobalData<Tc, T, S>*>(globalDataDevice);
+#else
+    const GlobalData<Tc, T, S>* data = reinterpret_cast<const GlobalData<Tc, T, S>*>(globalData);
+#endif
+
+    const unsigned octant = unsigned(dX[0] > 0) | (unsigned(dX[1] > 0) << 1) | (unsigned(dX[2] > 0) << 2);
+    const T*       m2m    = data->m2m[octant];
+
+    for (unsigned i = 0; i < S; ++i)
+    {
+        T ci = 0;
+        for (unsigned j = 0; j < S; ++j)
+            ci += m2m[i * S + j] * addend[j];
+        composite[i] += ci;
+    }
 }
 
 #define INSTANTIATE_RTFMM_MULTIPOLE(S)                                                                                 \

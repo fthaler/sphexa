@@ -66,8 +66,16 @@ public:
 
         auto leaves = focusTree.treeLeavesAcc().data();
 
-        computeLeafMultipoles(x, y, z, m, octree_.leafToInternal + octree_.numInternalNodes, leaves,
-                              octree_.numLeafNodes, layout_, centers_, geoCenters, rawPtr(multipoles_));
+        if constexpr (MType{}.size() > 20)
+        {
+            rtfmmP2M<MType{}.size()>(x, y, z, m, octree_.leafToInternal + octree_.numInternalNodes, leaves,
+                                     octree_.numLeafNodes, layout_, geoCenters, rawPtr(multipoles_));
+        }
+        else
+        {
+            computeLeafMultipoles(x, y, z, m, octree_.leafToInternal + octree_.numInternalNodes, leaves,
+                                  octree_.numLeafNodes, layout_, centers_, geoCenters, rawPtr(multipoles_));
+        }
 
         auto upsweepGpu = [](auto levelRange, auto childOffsets, auto M, auto centers, auto geoCenters)
         {

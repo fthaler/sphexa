@@ -15,7 +15,15 @@
 
 #pragma once
 
+#ifdef __CUDACC__
+#include <cublas_v2.h>
+
+#include "cstone/cuda/errorcheck.cuh"
+#include "cstone/primitives/primitives_gpu.h"
+#endif
+
 #include "kernel.hpp"
+#include "cstone/sfc/common.hpp"
 
 namespace ryoanji
 {
@@ -208,8 +216,98 @@ void rtfmmInit(Tc r0);
 
 void rtfmmFinalize();
 
-template<class T1, class T2, class T3, class T4, unsigned S>
-void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const T3* uT, const T3* vSinv,
-              RtfmmMultipole<T4, S>* multipoles);
+#ifdef __CUDACC__
+template<unsigned S, class T1, class T2, class KeyType>
+__global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* q, const TreeNodeIndex* leafToInternal,
+                               const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout,
+                               const cstone::Vec3<T1>* geoCenters, T2* qEquivAllDevice)
+{
+    const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
+
+    const int bidx  = blockIdx.x;
+    const int tidx  = threadIdx.x;
+    const int thNum = blockDim.x;
+    if (bidx >= numLeaves) return;
+
+    const auto level       = cstone::treeLevel(leaves[bidx + 1] - leaves[bidx]);
+    const auto internalIdx = leafToInternal[bidx];
+    const T2   scale       = T2(1) / (1 << level);
+    const T2   scaleR      = T2(2.95) / (1 << level) * data->r0;
+    const auto center      = geoCenters[internalIdx];
+
+    const int offset = layout[bidx];
+    const int count  = layout[bidx + 1] - offset;
+
+    for (int j = tidx; j < S; j += thNum)
+    {
+        T1 xj = data->surfacePointsX[j] * scaleR + center[0];
+        T1 yj = data->surfacePointsY[j] * scaleR + center[1];
+        T1 zj = data->surfacePointsZ[j] * scaleR + center[2];
+
+        T2 p = 0.0f;
+        for (int i = 0; i < count; i++)
+        {
+            T1 xi = x[offset + i];
+            T1 yi = y[offset + i];
+            T1 zi = z[offset + i];
+            T2 qi = q[offset + i];
+
+            T1 dx = xj - xi;
+            T1 dy = yj - yi;
+            T1 dz = zj - zi;
+            T2 r2 = dx * dx + dy * dy + dz * dz;
+            p += qi / std::sqrt(r2);
+        }
+        qEquivAllDevice[bidx * S + j] = p * scale;
+    }
+}
+
+inline void checkCublas(cublasStatus_t status)
+{
+    if (status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error("CUBLAS error");
+}
+
+template<unsigned S, class T1, class T2, class KeyType>
+void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNodeIndex* leafToInternal,
+              const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
+              RtfmmMultipole<T2, S>* multipoles)
+{
+    // TODO: move to outside
+    cublasHandle_t handle;
+    checkCublas(cublasCreate(&handle));
+    T2* qEquivAllDevice;
+    checkGpuErrors(cudaMalloc(&qEquivAllDevice, S * numLeaves * sizeof(T2)));
+
+    const int blockNum  = numLeaves;
+    const int blockSize = std::min(S, 1024u);
+
+    // TODO: CUDA stream
+    rtfmmP2mKernel<S>
+        <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, qEquivAllDevice);
+
+    GlobalData<T1, T2, S>* data;
+    checkGpuErrors(cudaGetSymbolAddress((void**)&data, globalDataDevice));
+
+    T2   alpha = 1;
+    T2   beta  = 0;
+    auto gemm  = []<class... Args>(Args&&... args)
+    {
+        if constexpr (std::is_same_v<T2, double>)
+            return cublasDgemm(std::forward<Args>(args)...);
+        else
+            return cublasSgemm(std::forward<Args>(args)...);
+    };
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->uT, S, qEquivAllDevice, S, &beta,
+                     qEquivAllDevice, S));
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, qEquivAllDevice, S,
+                     &beta, qEquivAllDevice, S));
+
+    cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),
+                       multipoles);
+
+    checkGpuErrors(cudaFree(qEquivAllDevice));
+    checkCublas(cublasDestroy(handle));
+}
+#endif
 
 } // namespace ryoanji

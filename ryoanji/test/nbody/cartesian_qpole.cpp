@@ -44,7 +44,7 @@ TEST(Gravity, Cartesian_M2P)
 
     SourceCenterType<T>    center = massCenter<T>(x, y, z, masses.data(), 0, numParticles);
     CartesianQuadrupole<T> multipole;
-    P2M(x, y, z, masses.data(), 0, numParticles, center, multipole);
+    P2M(x, y, z, masses.data(), 0, numParticles, 0, center, {0.0, 0.0, 0.0}, multipole);
 
     // target particle coordinates
     util::array<T, 3> target{-8, 0, 0};
@@ -100,7 +100,7 @@ TEST(Gravity, Cartesian_M2M)
     // reference directly constructed from particles
     SourceCenterType<T>    refCenter = massCenter<T>(x, y, z, masses.data(), 0, numParticles);
     CartesianQuadrupole<T> reference;
-    P2M(x, y, z, masses.data(), 0, numParticles, refCenter, reference);
+    P2M(x, y, z, masses.data(), 0, numParticles, 0, refCenter, {0.0, 0.0, 0.0}, reference);
 
     LocalIndex             eighth = numParticles / 8;
     CartesianQuadrupole<T> sc[8];
@@ -108,12 +108,12 @@ TEST(Gravity, Cartesian_M2M)
     for (int i = 0; i < 8; ++i)
     {
         centers[i] = massCenter<T>(x, y, z, masses.data(), i * eighth, (i + 1) * eighth);
-        P2M(x, y, z, masses.data(), i * eighth, (i + 1) * eighth, centers[i], sc[i]);
+        P2M(x, y, z, masses.data(), i * eighth, (i + 1) * eighth, 1, centers[i], {0.0, 0.0, 0.0}, sc[i]);
     }
 
     // aggregate subcell multipoles
     CartesianQuadrupole<T> composite;
-    M2M(0, 8, refCenter, centers, sc, composite);
+    M2M(0, 8, refCenter, centers, cstone::Vec3<T>{0.0, 0.0, 0.0}, (cstone::Vec3<T>*)nullptr, sc, composite);
 
     EXPECT_NEAR(reference[Cqi::mass], composite[Cqi::mass], 1e-10);
     EXPECT_NEAR(reference[Cqi::qxx], composite[Cqi::qxx], 1e-10);
@@ -144,7 +144,7 @@ TEST(Gravity, CartesianMDQ_M2P)
 
     SourceCenterType<T> center = massCenter<T>(x, y, z, masses.data(), 0, numParticles);
     CartesianMDQpole<T> multipole;
-    P2M(x, y, z, masses.data(), 0, numParticles, center, multipole);
+    P2M(x, y, z, masses.data(), 0, numParticles, 0, center, {0.0, 0.0, 0.0}, multipole);
 
     // target particle coordinates
     util::array<T, 3> target{-8, 0, 0};
@@ -196,7 +196,7 @@ TEST(Gravity, CartesianMDQ_M2M)
     // reference directly constructed from particles
     SourceCenterType<T> refCenter = massCenter<T>(x, y, z, masses.data(), 0, numParticles);
     CartesianMDQpole<T> reference;
-    P2M(x, y, z, masses.data(), 0, numParticles, refCenter, reference);
+    P2M(x, y, z, masses.data(), 0, numParticles, 0, refCenter, {0.0, 0.0, 0.0}, reference);
 
     LocalIndex          eighth = numParticles / 8;
     CartesianMDQpole<T> sc[8];
@@ -204,12 +204,12 @@ TEST(Gravity, CartesianMDQ_M2M)
     for (int i = 0; i < 8; ++i)
     {
         centers[i] = massCenter<T>(x, y, z, masses.data(), i * eighth, (i + 1) * eighth);
-        P2M(x, y, z, masses.data(), i * eighth, (i + 1) * eighth, centers[i], sc[i]);
+        P2M(x, y, z, masses.data(), i * eighth, (i + 1) * eighth, 1, centers[i], {0.0, 0.0, 0.0}, sc[i]);
     }
 
     // aggregate subcell multipoles
     CartesianMDQpole<T> composite;
-    M2M(0, 8, refCenter, centers, sc, composite);
+    M2M(0, 8, refCenter, centers, {0.0, 0.0, 0.0}, (cstone::Vec3<T>*)nullptr, sc, composite);
 
     EXPECT_NEAR(reference[Cqi::mass], composite[Cqi::mass], 1e-10);
     EXPECT_NEAR(reference[Cqi::qxx], composite[Cqi::qxx], 1e-10);

@@ -174,9 +174,14 @@ makeTestTree(Coords& coordinates, cstone::Box<T> box, float mass_scale, float th
                                    centers.data());
     upsweep(octree.levelRange, octree.childOffsets.data(), centers.data(), CombineSourceCenter<T>{});
 
-    std::vector<MultipoleType> multipoles(octree.numNodes);
-    computeLeafMultipoles(x, y, z, masses.data(), toInternal, layout.data(), centers.data(), multipoles.data());
-    upsweepMultipoles(octree.levelRange, octree.childOffsets.data(), centers.data(), multipoles.data());
+    std::vector<MultipoleType>   multipoles(octree.numNodes);
+    std::vector<cstone::Vec3<T>> geoCenters(octree.numNodes), geoSizes(octree.numNodes);
+    nodeFpCenters(std::span<const KeyType>(octree.prefixes.data(), size_t(octree.numNodes)), geoCenters.data(),
+                  geoSizes.data(), box);
+    computeLeafMultipoles(x, y, z, masses.data(), toInternal, treeLeaves.data(), layout.data(), centers.data(),
+                          geoCenters.data(), multipoles.data());
+    upsweepMultipoles(octree.levelRange, octree.childOffsets.data(), centers.data(), geoCenters.data(),
+                      multipoles.data());
 
     T totalMass = std::accumulate(masses.begin(), masses.end(), 0.0);
     EXPECT_NEAR(totalMass, multipoles[0][ryoanji::Cqi::mass], 1e-6);
@@ -305,9 +310,9 @@ TEST(EwaldGravity, CombineMultipoleTrace)
         V(2) std::cout << "---------------------" << std::endl;
         V(2) std::cout << "M0" << std::endl << M0;
 
-        ryoanji::P2M(x, y, z, m, 0, 3, c[0], M[0]);
-        ryoanji::P2M(x, y, z, m, 3, 6, c[1], M[1]);
-        ryoanji::M2M(0, 2, C, c, M, M0);
+        ryoanji::P2M(x, y, z, m, 0, 3, 0, c[0], {0.0, 0.0, 0.0}, M[0]);
+        ryoanji::P2M(x, y, z, m, 3, 6, 0, c[1], {0.0, 0.0, 0.0}, M[1]);
+        ryoanji::M2M(0, 2, C, c, cstone::Vec3<T>{0.0, 0.0, 0.0}, (cstone::Vec3<T>*)nullptr, M, M0);
 
         V(2) std::cout << "---------------------" << std::endl;
         V(2) std::cout << "M0" << std::endl << M0;
@@ -317,7 +322,7 @@ TEST(EwaldGravity, CombineMultipoleTrace)
         V(2) std::cout << "---------------------" << std::endl;
         V(2) std::cout << "M[1]" << std::endl << M[1];
 
-        ryoanji::P2M(x, y, z, m, 0, 6, C, M1);
+        ryoanji::P2M(x, y, z, m, 0, 6, 0, C, {0.0, 0.0, 0.0}, M1);
         V(2) std::cout << "---------------------" << std::endl;
         V(2) std::cout << "M1" << std::endl << M1;
 
@@ -369,10 +374,10 @@ TEST(EwaldGravity, CombineMultipoleTrace)
         V(2) std::cout << "---------------------" << std::endl;
         V(2) std::cout << "M0" << std::endl << M0;
 
-        ryoanji::P2M(x, y, z, m, 0, 2, c[0], M[0]);
-        ryoanji::P2M(x, y, z, m, 2, 4, c[1], M[1]);
-        ryoanji::P2M(x, y, z, m, 4, 6, c[2], M[2]);
-        ryoanji::M2M(0, 3, C, c, M, M0);
+        ryoanji::P2M(x, y, z, m, 0, 2, 0, c[0], {0.0, 0.0, 0.0}, M[0]);
+        ryoanji::P2M(x, y, z, m, 2, 4, 0, c[1], {0.0, 0.0, 0.0}, M[1]);
+        ryoanji::P2M(x, y, z, m, 4, 6, 0, c[2], {0.0, 0.0, 0.0}, M[2]);
+        ryoanji::M2M(0, 3, C, c, {0.0, 0.0, 0.0}, (cstone::Vec3<T>*)nullptr, M, M0);
 
         V(2) std::cout << "---------------------" << std::endl;
         V(2) std::cout << "M0" << std::endl << M0;
@@ -384,7 +389,7 @@ TEST(EwaldGravity, CombineMultipoleTrace)
         V(2) std::cout << "---------------------" << std::endl;
         V(2) std::cout << "M[2]" << std::endl << M[2];
 
-        ryoanji::P2M(x, y, z, m, 0, 6, C, M1);
+        ryoanji::P2M(x, y, z, m, 0, 6, 0, C, {0.0, 0.0, 0.0}, M1);
         V(2) std::cout << "---------------------" << std::endl;
         V(2) std::cout << "M1" << std::endl << M1;
 
@@ -493,7 +498,7 @@ TEST(EwaldGravity, ewaldEvalMultipoleComplete)
         T m[1] = {1};
 
         CartesianQuadrupole<T> multipole{0};
-        ryoanji::P2M(x, y, z, m, 0, 1, Vec4{0}, multipole);
+        ryoanji::P2M(x, y, z, m, 0, 1, 0, Vec4{0}, {0.0, 0.0, 0.0}, multipole);
 
         Vec4 potAccExpect[3]{{-0.5, -0.25, 0.00, 0.00}, {-0.5, 0.00, -0.25, 0.00}, {-0.5, 0.00, 0.00, -0.25}};
 
@@ -518,7 +523,7 @@ TEST(EwaldGravity, ewaldEvalMultipoleComplete)
         T m[6] = {2, 2, 2, 2, 2, 2};
 
         CartesianQuadrupole<T> multipole{0};
-        ryoanji::P2M(x, y, z, m, 0, 6, Vec4{0}, multipole);
+        ryoanji::P2M(x, y, z, m, 0, 6, 0, Vec4{0}, {0.0, 0.0, 0.0}, multipole);
 
         Vec4 potAccExpect[3]{
             {-1.2e-01, -1.2e-03, 0.0e+00, 0.0e+00},
@@ -547,7 +552,7 @@ TEST(EwaldGravity, ewaldEvalMultipoleComplete)
         T m[6] = {2, 2, 2, 2, 2, 2};
 
         CartesianQuadrupole<T> multipole{0};
-        ryoanji::P2M(x, y, z, m, 0, 1, Vec4{-1, 0, 0, 0}, multipole);
+        ryoanji::P2M(x, y, z, m, 0, 1, 0, Vec4{-1, 0, 0, 0}, {0.0, 0.0, 0.0}, multipole);
 
         for (int i = 1; i < 5; i++)
         {

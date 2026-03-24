@@ -286,7 +286,7 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
         <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, qEquivAllDevice);
 
     GlobalData<T1, T2, S>* data;
-    checkGpuErrors(cudaGetSymbolAddress((void**)&data, globalDataDevice));
+    checkGpuErrors(cudaMemcpyFromSymbol(&data, globalDataDevice, sizeof(void*)));
 
     T2   alpha = 1;
     T2   beta  = 0;

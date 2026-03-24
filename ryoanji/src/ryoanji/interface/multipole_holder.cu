@@ -66,7 +66,9 @@ public:
 
         auto leaves = focusTree.treeLeavesAcc().data();
 
-        if constexpr (MType{}.size() > 20)
+        constexpr bool isRtfmm = MType{}.size() > 20;
+
+        if constexpr (isRtfmm)
         {
             rtfmmP2M<MType{}.size()>(x, y, z, m, octree_.leafToInternal + octree_.numInternalNodes, leaves,
                                      octree_.numLeafNodes, layout_, geoCenters, rawPtr(multipoles_));
@@ -77,15 +79,24 @@ public:
                                   octree_.numLeafNodes, layout_, centers_, geoCenters, rawPtr(multipoles_));
         }
 
-        auto upsweepGpu = [](auto levelRange, auto childOffsets, auto M, auto centers, auto geoCenters)
+        auto upsweepGpu = [&](auto levelRange, auto childOffsets, auto M, auto centers, auto geoCenters)
         {
-            int numLevels = levelRange.size() - 2;
-            for (int level = numLevels - 1; level >= 0; level--)
+            if constexpr (isRtfmm)
             {
-                int numCellsLevel = levelRange[level + 1] - levelRange[level];
-                if (numCellsLevel)
+                rtfmmM2M<MType{}.size()>(levelRange, childOffsets,
+                                         octree_.numInternalNodes + octree_.numLeafNodes geoCenters, M);
+            }
+            else
+            {
+                int numLevels = levelRange.size() - 2;
+                for (int level = numLevels - 1; level >= 0; level--)
                 {
-                    upsweepMultipoles(levelRange[level], levelRange[level + 1], childOffsets, centers, geoCenters, M);
+                    int numCellsLevel = levelRange[level + 1] - levelRange[level];
+                    if (numCellsLevel)
+                    {
+                        upsweepMultipoles(levelRange[level], levelRange[level + 1], childOffsets, centers, geoCenters,
+                                          M);
+                    }
                 }
             }
         };

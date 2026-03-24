@@ -307,6 +307,40 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
     checkGpuErrors(cudaFree(qEquivAllDevice));
     checkCublas(cublasDestroy(handle));
 }
+
+template<unsigned S, class T1, class T2>
+void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* childOffsets,
+              const TreeNodeIndex numNodes, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
+{
+    T2 **m2mPtrs, **multipolePtrs, **tmpPtrs;
+    checkGpuErrors(cudaMalloc(&m2mPtrs, numNodes * sizeof(T2*)));
+    checkGpuErrors(cudaMalloc(&multipolePtrs, numNodes * sizeof(T2*)));
+    checkGpuErrors(cudaMalloc(&tmpPtrs, numNodes * sizeof(T2*)));
+
+    RtfmmMultipole<T2, S>* tmp;
+    checkGpuErrors(cudaMalloc(&tmp, numNodes * sizeof(RtfmmMultipole<T2, S>)));
+
+    // TODO: compute device matrix pointers (m2mPtrs) for each node based on octants; multipolePtrs and tmpPtrs can just
+    // point to start of multipoles for each node
+
+    const int numLevels = levelRange.size() - 1;
+    for (int level = numLevels - 1; level > 0; level--)
+    {
+        if (levelRange[level + 1] - levelRange[level])
+        {
+            // TODO: batched GEMV with correct m2m matrix of src nodes M in levelRange[level], levelRange[level + 1] to
+            // tmp buffer
+
+            // TODO: gathering/summation to target nodes in levelRange[level - 1], levelRange[level] of src nodes result
+            // from temporary buffer into M
+        }
+    }
+
+    checkGpuErrors(cudaFree(m2mPtrs));
+    checkGpuErrors(cudaFree(multipolePtrs));
+    checkGpuErrors(cudaFree(tmpPtrs));
+    checkGpuErrors(cudaFree(tmp));
+}
 #endif
 
 } // namespace ryoanji

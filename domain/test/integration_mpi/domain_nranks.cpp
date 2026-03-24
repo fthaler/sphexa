@@ -509,7 +509,7 @@ TEST(FocusDomain, fixedBoundaries)
     Box<Real> box(0, 1);
     LocalIndex numParticles = 1000;
     float theta             = 1.0;
-    int maxLevel            = 5;
+    int maxLevel            = 3;
 
     std::vector<KeyType> boundaries(numRanks + 1);
     for (int rank = 0; rank < numRanks; ++rank)
@@ -540,6 +540,14 @@ TEST(FocusDomain, fixedBoundaries)
     std::vector<KeyType> keys(x.size());
     std::vector<LocalIndex> sfcOrder;
     domain.sync(keys, x, y, z, q, sfcOrder, std::tie(s1, s2));
+
+    if (rank == 0)
+    {
+        //auto l = domain.focusTree().leafCountsAcc();
+        auto l = domain.layout();
+        for (auto i : l) std::cout << i << " ";
+        std::cout << std::endl;
+    }
 
     EXPECT_TRUE(std::is_sorted(keys.begin(), keys.end()));
 }

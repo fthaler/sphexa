@@ -167,6 +167,21 @@ public:
         return converged;
     }
 
+    void computeLocalCounts(std::span<const KeyType> particleKeys)
+    {
+        reallocate(octreeAcc_.numLeafNodes, allocGrowthRate_, leafCountsAcc_);
+        if constexpr (HaveGpu<Accelerator>{})
+        {
+            computeNodeCountsGpu(rawPtr(leavesAcc_), rawPtr(leafCountsAcc_), octreeAcc_.numLeafNodes, particleKeys,
+                                 std::numeric_limits<unsigned>::max(), false);
+        }
+        else
+        {
+            computeNodeCounts<KeyType>(leaves_.data(), leafCountsAcc_.data(), nNodes(leaves_), particleKeys,
+                                       std::numeric_limits<unsigned>::max(), true);
+        }
+    }
+
     /*! @brief Perform a global update of the tree structure
      *
      * @param[in] particleKeys     SFC keys of local particles

@@ -60,7 +60,7 @@ HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m,
         T1 zj = data->surfacePointsZ[j] * scaleR + geoCenter[2];
 
         T2 p = 0;
-        for (LocalIndex i = begin; i < end; ++i)
+        for (LocalIndex i = begin; i < end; i += stride)
         {
             T1 xi = x[i];
             T1 yi = y[i];

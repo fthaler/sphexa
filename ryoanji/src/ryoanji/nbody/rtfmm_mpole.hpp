@@ -168,7 +168,7 @@ HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>*
                                  unsigned level, const Vec4<T1>& center, const Vec3<T1>& geoCenter,                    \
                                  RtfmmMultipole<T3, S>& gv)                                                            \
     {                                                                                                                  \
-        return P2M_add<stride, T1, T2, T3, S>(x, y, z, m, begin, end, level, center, gv);                              \
+        return P2M_add<stride, T1, T2, T3, S>(x, y, z, m, begin, end, level, center, geoCenter, gv);                   \
     }                                                                                                                  \
     template<class T>                                                                                                  \
     HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)                                         \

@@ -83,14 +83,17 @@ static bool multipoleHolderTest(int thisRank, int numRanks)
 
         MultipoleType globalRootMultipole = multipoles[0];
 
-        auto                                     d_centers = focusTree.expansionCentersAcc();
+        auto                                     d_centers    = focusTree.expansionCentersAcc();
+        auto                                     d_geoCenters = focusTree.geoCentersAcc();
         std::vector<cstone::SourceCenterType<T>> centers(d_centers.size());
+        std::vector<cstone::Vec3<T>>             geoCenters(d_geoCenters.size());
         memcpyD2H(d_centers.data(), d_centers.size(), centers.data());
+        memcpyD2H(d_geoCenters.data(), d_geoCenters.size(), geoCenters.data());
 
         // compute reference root cell multipole from global particle data
         MultipoleType reference;
         P2M(coords.x().data(), coords.y().data(), coords.z().data(), globalMasses.data(), 0, numParticles * numRanks, 0,
-            centers[0], reference);
+            centers[0], geoCenters[0], reference);
 
         double maxDiff = max(abs(reference - globalRootMultipole));
 

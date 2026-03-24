@@ -72,9 +72,14 @@ TEST(Gravity, TreeWalk)
     upsweep(octree.levelRange, octree.childOffsets.data(), centers.data(), CombineSourceCenter<T>{});
     setMac<T, KeyType>(octree.prefixes, centers, 1.0 / theta, box);
 
-    std::vector<MultipoleType> multipoles(octree.numNodes);
-    computeLeafMultipoles(x, y, z, masses.data(), toInternal, layout.data(), centers.data(), multipoles.data());
-    upsweepMultipoles(octree.levelRange, octree.childOffsets.data(), centers.data(), multipoles.data());
+    std::vector<MultipoleType>   multipoles(octree.numNodes);
+    std::vector<cstone::Vec3<T>> geoCenters(octree.numNodes), geoSizes(octree.numNodes);
+    nodeFpCenters(std::span<const KeyType>(octree.prefixes.data(), size_t(octree.numNodes)), geoCenters.data(),
+                  geoSizes.data(), box);
+    computeLeafMultipoles(x, y, z, masses.data(), toInternal, treeLeaves.data(), layout.data(), centers.data(),
+                          geoCenters.data(), multipoles.data());
+    upsweepMultipoles(octree.levelRange, octree.childOffsets.data(), centers.data(), geoCenters.data(),
+                      multipoles.data());
 
     T totalMass = std::accumulate(masses.begin(), masses.end(), 0.0);
     EXPECT_TRUE(std::abs(totalMass - multipoles[0][ryoanji::Cqi::mass]) < 1e-6);

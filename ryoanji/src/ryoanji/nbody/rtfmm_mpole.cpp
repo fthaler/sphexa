@@ -16,7 +16,9 @@ namespace ryoanji
 {
 
 void*            globalData;
+#ifdef __CUDACC__
 __device__ void* globalDataDevice;
+#endif
 
 template<class T>
 std::vector<cstone::Vec3<T>> getSurfacePoints(unsigned p, T r = 1, cstone::Vec3<T> x = {0, 0, 0}, int dir = 0)

@@ -144,6 +144,20 @@ HOST_DEVICE_FUN void addQuadrupole(RtfmmMultipole<T, S>& composite, Vec3<Tc> dX,
     }
 }
 
+template<class T, unsigned S, class Tm>
+HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc,
+                         const RtfmmMultipole<Tm, S>* Msrc, RtfmmMultipole<Tm, S>& Mout)
+{
+    Mout = 0;
+    for (int i = begin; i < end; i++)
+    {
+        const RtfmmMultipole<Tm, S>& Mi = Msrc[i];
+        Vec4<T>                      Xi = Xsrc[i];
+        Vec3<T>                      dX = makeVec3(Xout - Xi);
+        addQuadrupole<Tm, S, T>(Mout, dX, Mi);
+    }
+}
+
 #define INSTANTIATE_RTFMM_MULTIPOLE(S)                                                                                 \
     template<int stride, class T1, class T2, class T3>                                                                 \
     HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end, \
@@ -173,6 +187,12 @@ HOST_DEVICE_FUN void addQuadrupole(RtfmmMultipole<T, S>& composite, Vec3<Tc> dX,
                                        const RtfmmMultipole<T, S>& addend)                                             \
     {                                                                                                                  \
         return addQuadrupole<T, S, Tc>(composite, dX, addend);                                                         \
+    }                                                                                                                  \
+    template<class T, class Tm>                                                                                        \
+    HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc,                             \
+                             const RtfmmMultipole<Tm, S>* Msrc, RtfmmMultipole<Tm, S>& Mout)                           \
+    {                                                                                                                  \
+        M2M<T, S, Tm>(begin, end, Xout, Xsrc, Msrc, Mout);                                                             \
     }
 
 INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(5))

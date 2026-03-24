@@ -21,13 +21,13 @@
 #include "coord_samples/random.hpp"
 
 #include "ryoanji/interface/global_multipole.hpp"
+#include "ryoanji/nbody/rtfmm_mpole.hpp"
 
 using namespace ryoanji;
 
-template<class T, class KeyType>
+template<class T, class KeyType, class MultipoleType>
 static int multipoleExchangeTest(int thisRank, int numRanks)
 {
-    using MultipoleType              = CartesianQuadrupole<T>;
     const LocalIndex numParticles    = 1000 * numRanks;
     unsigned         bucketSize      = 64;
     unsigned         bucketSizeLocal = 16;
@@ -95,11 +95,7 @@ static int multipoleExchangeTest(int thisRank, int numRanks)
         std::cout << "Multipole test result: " << testResultMp << std::endl;
     }
 
-    if (numPassed[0] == numRanks && numPassed[1] == numRanks) { return EXIT_SUCCESS; }
-    else
-    {
-        return EXIT_FAILURE;
-    }
+    return numPassed[0] == numRanks && numPassed[1] == numRanks;
 }
 
 int main(int argc, char** argv)
@@ -110,9 +106,13 @@ int main(int argc, char** argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
 
-    int testResult = multipoleExchangeTest<double, uint64_t>(rank, numRanks);
+    bool quadrupoleTestResult = multipoleExchangeTest<double, uint64_t, CartesianQuadrupole<double>>(rank, numRanks);
+
+    rtfmmInit<double, double, 5>(1.0);
+    bool rtfmmTestResult =
+        multipoleExchangeTest<double, uint64_t, RtfmmMultipole<double, ryoanji::rtfmmSurfacePoints(5)>>(rank, numRanks);
 
     MPI_Finalize();
 
-    return testResult;
+    return quadrupoleTestResult && rtfmmTestResult ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -474,16 +474,15 @@ public:
         TreeNodeIndex fAssignStart = findNodeAbove(rawPtr(leaves_), nNodes(leaves_), assignment[myRank_]);
         TreeNodeIndex fAssignEnd   = findNodeAbove(rawPtr(leaves_), nNodes(leaves_), assignment[myRank_ + 1]);
 
+        if (not accumulate) { fill<useGpu>(macsAcc_.begin(), macsAcc_.end(), 0); }
         if constexpr (HaveGpu<Accelerator>{})
         {
-            if (not accumulate) { fillGpu(rawPtr(macsAcc_), rawPtr(macsAcc_) + macsAcc_.size(), uint8_t(0)); }
             markMacsGpu(rawPtr(octreeAcc_.prefixes), rawPtr(octreeAcc_.childOffsets), rawPtr(octreeAcc_.parents),
                         rawPtr(centersAcc_), box_, rawPtr(leavesAcc_) + fAssignStart, fAssignEnd - fAssignStart, false,
                         rawPtr(macsAcc_));
         }
         else
         {
-            if (not accumulate) { std::fill(rawPtr(macsAcc_), rawPtr(macsAcc_) + macsAcc_.size(), uint8_t(0)); }
             markMacs(rawPtr(octreeAcc_.prefixes), rawPtr(octreeAcc_.childOffsets), rawPtr(octreeAcc_.parents),
                      rawPtr(centersAcc_), box_, rawPtr(leaves_) + fAssignStart, fAssignEnd - fAssignStart, false,
                      rawPtr(macsAcc_));
@@ -621,6 +620,8 @@ public:
             updateGeoCenters();
             MPI_Allreduce(MPI_IN_PLACE, &converged, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
         }
+        reallocate(macsAcc_, octreeAcc_.numNodes, allocGrowthRate_);
+        fill<useGpu>(macsAcc_.begin(), macsAcc_.end(), 0);
     }
 
     /*! @brief exchange data of non-peer (beyond focus) tree cells

@@ -31,6 +31,8 @@
 #include "cstone/findneighbors.hpp"
 #include "unit/neighbors/all_to_all.hpp"
 
+#include "cstone/domain/domain_fixed.hpp"
+
 using namespace cstone;
 
 template<class KeyType, class T, class DomainType>
@@ -491,4 +493,53 @@ TEST(FocusDomain, randomGaussianGrav)
     MPI_Comm_size(MPI_COMM_WORLD, &nRanks);
 
     randomGaussianGrav<uint64_t, double>(rank, nRanks);
+}
+
+TEST(FocusDomain, fixedBoundaries)
+{
+    int rank = 0, numRanks = 0;
+
+    MPI_Comm comm = MPI_COMM_WORLD;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &numRanks);
+
+    using Real    = double;
+    using KeyType = unsigned;
+
+    Box<Real> box(0, 1);
+    LocalIndex numParticles = 1000;
+    float theta             = 1.0;
+    int maxLevel            = 5;
+
+    std::vector<KeyType> boundaries(numRanks + 1);
+    for (int rank = 0; rank < numRanks; ++rank)
+    {
+        boundaries[rank] = rank * (nodeRange<KeyType>(0) / numRanks);
+    }
+    boundaries.back() = nodeRange<KeyType>(0);
+
+    // identical on all ranks
+    RandomCoordinates<Real, SfcKind<KeyType>> coords(numParticles, box, rank);
+
+    // locate particles assigned to thisRank
+    auto firstAssignedIndex =
+        findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaries[rank]);
+    auto lastAssignedIndex =
+        findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaries[rank + 1]);
+
+    std::vector<Real> x(coords.x().begin() + firstAssignedIndex, coords.x().begin() + lastAssignedIndex);
+    std::vector<Real> y(coords.y().begin() + firstAssignedIndex, coords.y().begin() + lastAssignedIndex);
+    std::vector<Real> z(coords.z().begin() + firstAssignedIndex, coords.z().begin() + lastAssignedIndex);
+    std::vector<Real> q(x.size(), 1.0 / x.size());
+
+    std::vector<Real> s1, s2;
+
+    DomainFixed<KeyType, Real> domain;
+    domain.setBoundaries(boundaries, box, maxLevel, theta, comm, s1);
+
+    std::vector<KeyType> keys(x.size());
+    std::vector<LocalIndex> sfcOrder;
+    domain.sync(keys, x, y, z, q, sfcOrder, std::tie(s1, s2));
+
+    EXPECT_TRUE(std::is_sorted(keys.begin(), keys.end()));
 }

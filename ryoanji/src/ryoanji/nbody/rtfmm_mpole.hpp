@@ -227,7 +227,6 @@ __global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* 
     const int bidx  = blockIdx.x;
     const int tidx  = threadIdx.x;
     const int thNum = blockDim.x;
-    if (bidx >= numLeaves) return;
 
     const auto level       = cstone::treeLevel(leaves[bidx + 1] - leaves[bidx]);
     const auto internalIdx = leafToInternal[bidx];

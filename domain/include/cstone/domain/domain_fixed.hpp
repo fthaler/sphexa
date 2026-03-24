@@ -152,6 +152,24 @@ public:
         gatherArrays({sfcOrder.data(), nParticles()}, 0, std::tie(x, y, z, q), scratchBuffers);
 
         // compute local node particle counts and node particle layout
+        focusTree_.computeLocalCounts(keyView);
+
+        reallocate(focusTree_.octreeViewAcc().numLeafNodes + 1, allocGrowthRate_, layoutAcc_);
+        fill<useGpu>(layoutAcc_.begin(), layoutAcc_.end(), 0);
+        auto leafCounts    = focusTree_.leafCountsAcc();
+        auto letLocalRange = focusTree_.assignment()[myRank_];
+
+        if constexpr (useGpu)
+        {
+            exclusiveScanGpu(leafCounts.begin() + letLocalRange.start(), leafCounts.begin() + letLocalRange.end(),
+                             layoutAcc_.begin() + letLocalRange.start(), LocalIndex(0));
+        }
+        else
+        {
+            std::exclusive_scan(leafCounts.begin() + letLocalRange.start(), leafCounts.begin() + letLocalRange.end(),
+                                layoutAcc_.begin() + letLocalRange.start(), LocalIndex(0));
+        }
+        fill<useGpu>(layoutAcc_.begin() + letLocalRange.end(), layoutAcc_.end(), numParticles);
     }
 
     //! @brief return the index of the first particle that's part of the local assignment
@@ -163,7 +181,12 @@ public:
     //! @brief return number of locally assigned particles plus number of halos
     [[nodiscard]] LocalIndex nParticlesWithHalos() const { return bufDesc_.size; }
     //! @brief read only visibility of the global octree in traversible layout
-    OctreeView<const KeyType> globalTree() const { return globalOctreeAcc_.cdata(); }
+    OctreeView<const KeyType> globalTree() const
+    {
+        auto ret   = globalOctreeAcc_.cdata();
+        ret.leaves = globalLeavesAcc_.data();
+        return ret;
+    }
     //! @brief read only visibility of the focused octree
     const FocusedOctree<KeyType, T, Accelerator>& focusTree() const { return focusTree_; }
     //! @brief the index of the first locally assigned cell in focusTree()

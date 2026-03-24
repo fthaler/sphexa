@@ -507,7 +507,7 @@ TEST(FocusDomain, fixedBoundaries)
     using KeyType = unsigned;
 
     Box<Real> box(0, 1);
-    LocalIndex numParticles = 1000;
+    LocalIndex numParticles = 1000 * numRanks;
     float theta             = 1.0;
     int maxLevel            = 3;
 
@@ -519,7 +519,7 @@ TEST(FocusDomain, fixedBoundaries)
     boundaries.back() = nodeRange<KeyType>(0);
 
     // identical on all ranks
-    RandomCoordinates<Real, SfcKind<KeyType>> coords(numParticles, box, rank);
+    RandomCoordinates<Real, SfcKind<KeyType>> coords(numParticles, box, 42);
 
     // locate particles assigned to thisRank
     auto firstAssignedIndex =
@@ -541,13 +541,22 @@ TEST(FocusDomain, fixedBoundaries)
     std::vector<LocalIndex> sfcOrder;
     domain.sync(keys, x, y, z, q, sfcOrder, std::tie(s1, s2));
 
-    if (rank == 0)
-    {
-        //auto l = domain.focusTree().leafCountsAcc();
-        auto l = domain.layout();
-        for (auto i : l) std::cout << i << " ";
-        std::cout << std::endl;
-    }
+    auto ftree     = domain.focusTree();
+    auto ftreeView = ftree.octreeViewAcc();
 
+    std::vector<unsigned> counts(ftreeView.numNodes);
+    scatter<TreeNodeIndex>(ftreeView.leafToInternalSpan(), ftree.leafCountsAcc().data(), counts.data());
+    upsweep(ftreeView.levelRangeSpan(), ftreeView.childOffsets, counts.data(), NodeCount<unsigned>{});
+    ftree.peerExchange<unsigned>(counts, static_cast<int>(P2pTags::focusPeerCenters) + 2, s1);
+
+    auto upsweepCnt = [](auto levelRange, auto childOffsets, auto Q)
+    { upsweep(levelRange, childOffsets, Q, NodeCount<unsigned>{}); };
+
+    auto gOctree = domain.globalTree();
+    ftree.globalExchange<unsigned>(gOctree, counts, std::span<unsigned>{}, s1, upsweepCnt);
+
+    upsweep(ftreeView.levelRangeSpan(), ftreeView.childOffsets, counts.data(), NodeCount<unsigned>{});
+
+    EXPECT_EQ(numParticles, counts[0]);
     EXPECT_TRUE(std::is_sorted(keys.begin(), keys.end()));
 }

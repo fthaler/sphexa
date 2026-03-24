@@ -83,8 +83,8 @@ public:
         {
             if constexpr (isRtfmm)
             {
-                rtfmmM2M<MType{}.size()>(levelRange, childOffsets,
-                                         octree_.numInternalNodes + octree_.numLeafNodes geoCenters, M);
+                rtfmmM2M<MType{}.size()>(levelRange, childOffsets, octree_.numInternalNodes + octree_.numLeafNodes,
+                                         geoCenters, M);
             }
             else
             {

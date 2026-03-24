@@ -48,7 +48,7 @@ void computeLeafMultipoles(const T1* x, const T1* y, const T1* z, const T2* m,
     {
         TreeNodeIndex i     = leafToInternal[leafIdx];
         unsigned      level = cstone::treeLevel(leaves[leafIdx + 1] - leaves[leafIdx]);
-        P2M(x, y, z, m, layout[leafIdx], layout[leafIdx + 1], centers[i], multipoles[i]);
+        P2M(x, y, z, m, layout[leafIdx], layout[leafIdx + 1], level, centers[i], multipoles[i]);
     }
 }
 

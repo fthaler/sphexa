@@ -66,7 +66,7 @@ struct Cqi
  */
 template<int stride, class T1, class T2, class T3>
 HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                             const Vec4<T1>& center, CartesianQuadrupole<T3>& gv)
+                             unsigned /* level */, const Vec4<T1>& center, CartesianQuadrupole<T3>& gv)
 {
     for (LocalIndex i = begin; i < end; i += stride)
     {
@@ -109,10 +109,10 @@ HOST_DEVICE_FUN CartesianQuadrupole<T> P2M_finalize(CartesianQuadrupole<T> gv)
 
 template<int stride = 1, class T1, class T2, class T3>
 HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                         const Vec4<T1>& center, CartesianQuadrupole<T3>& gv)
+                         unsigned level, const Vec4<T1>& center, CartesianQuadrupole<T3>& gv)
 {
     gv = T3(0);
-    P2M_add<stride>(x, y, z, m, begin, end, center, gv);
+    P2M_add<stride>(x, y, z, m, begin, end, level, center, gv);
     gv = P2M_finalize(gv);
 }
 
@@ -236,7 +236,7 @@ HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>*
 
 template<int stride, class T1, class T2, class T3>
 HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                             const Vec4<T1>& center, CartesianMDQpole<T3>& gv)
+                             unsigned /* level */, const Vec4<T1>& center, CartesianMDQpole<T3>& gv)
 {
     for (LocalIndex i = begin; i < end; i += stride)
     {
@@ -296,10 +296,10 @@ HOST_DEVICE_FUN CartesianMDQpole<T> P2M_finalize(CartesianMDQpole<T> gv)
  */
 template<int stride = 1, class T1, class T2, class T3>
 HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                         const Vec4<T1>& center, CartesianMDQpole<T3>& gv)
+                         unsigned level, const Vec4<T1>& center, CartesianMDQpole<T3>& gv)
 {
     gv = T3(0);
-    P2M_add<stride>(x, y, z, m, begin, end, center, gv);
+    P2M_add<stride>(x, y, z, m, begin, end, level, center, gv);
     gv = P2M_finalize(gv);
 }
 

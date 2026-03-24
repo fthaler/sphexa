@@ -49,7 +49,7 @@ __global__ void computeLeafMultipolesKernel(const Tc* x, const Tc* y, const Tc* 
         internalIdx    = leafToInternal[leafIdx];
         auto     com   = centers[internalIdx];
         unsigned level = cstone::treeLevel(leaves[leafIdx + 1] - leaves[leafIdx]);
-        P2M_add<TPL>(x, y, z, m, layout[leafIdx] + threadIdx.x % TPL, layout[leafIdx + 1], com, mp_loc);
+        P2M_add<TPL>(x, y, z, m, layout[leafIdx] + threadIdx.x % TPL, layout[leafIdx + 1], level, com, mp_loc);
     }
 
 #pragma unroll

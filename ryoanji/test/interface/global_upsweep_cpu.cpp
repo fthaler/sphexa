@@ -76,7 +76,7 @@ static int multipoleExchangeTest(int thisRank, int numRanks)
 
     // compute reference root cell multipole from global particle data
     MultipoleType reference;
-    P2M(coords.x().data(), coords.y().data(), coords.z().data(), globalMasses.data(), 0, numParticles * numRanks,
+    P2M(coords.x().data(), coords.y().data(), coords.z().data(), globalMasses.data(), 0, numParticles * numRanks, 0,
         centers[octree.levelRange[0]], reference);
 
     double maxDiffCe = max(abs(makeVec3(refCenter - centers[0])));
@@ -96,7 +96,10 @@ static int multipoleExchangeTest(int thisRank, int numRanks)
     }
 
     if (numPassed[0] == numRanks && numPassed[1] == numRanks) { return EXIT_SUCCESS; }
-    else { return EXIT_FAILURE; }
+    else
+    {
+        return EXIT_FAILURE;
+    }
 }
 
 int main(int argc, char** argv)

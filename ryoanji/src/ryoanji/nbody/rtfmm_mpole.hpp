@@ -39,10 +39,10 @@ using RtfmmMultipole = util::array<T, S>;
 
 template<int stride, class T1, class T2, class T3, unsigned S>
 HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                             const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)
+                             unsigned level, const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)
 {
-    T2 scale  = 1; // TODO: 1 / 2^treeLevel
-    T2 scaleR = 1; // TODO: ?
+    T2 scale  = T2(1) / (1 << level);
+    T2 scaleR = T2(2.95) / (1 << level); // TODO: times r0
 
 #ifdef __CUDA_ARCH__
     const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
@@ -106,10 +106,10 @@ HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)
 
 template<int stride = 1, class T1, class T2, class T3, unsigned S>
 HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                         const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)
+                         unsigned level, const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)
 {
     gv = T3(0);
-    P2M_add<stride, T1, T2, T3, S>(x, y, z, m, begin, end, center, gv);
+    P2M_add<stride, T1, T2, T3, S>(x, y, z, m, begin, end, level, center, gv);
     gv = P2M_finalize<T3, S>(gv);
 }
 
@@ -129,9 +129,9 @@ HOST_DEVICE_FUN void addQuadrupole(RtfmmMultipole<T, S>& composite, Vec3<Tc> dX,
 #define INSTANTIATE_RTFMM_MULTIPOLE(S)                                                                                 \
     template<int stride, class T1, class T2, class T3>                                                                 \
     HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end, \
-                                 const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)                                    \
+                                 unsigned level, const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)                    \
     {                                                                                                                  \
-        return P2M_add<stride, T1, T2, T3, S>(x, y, z, m, begin, end, center, gv);                                     \
+        return P2M_add<stride, T1, T2, T3, S>(x, y, z, m, begin, end, level, center, gv);                              \
     }                                                                                                                  \
     template<class T>                                                                                                  \
     HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)                                         \
@@ -140,9 +140,9 @@ HOST_DEVICE_FUN void addQuadrupole(RtfmmMultipole<T, S>& composite, Vec3<Tc> dX,
     }                                                                                                                  \
     template<int stride = 1, class T1, class T2, class T3>                                                             \
     HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,     \
-                             const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)                                        \
+                             unsigned level, const Vec4<T1>& center, RtfmmMultipole<T3, S>& gv)                        \
     {                                                                                                                  \
-        return P2M<stride, T1, T2, T3, S>(x, y, z, m, begin, end, center, gv);                                         \
+        return P2M<stride, T1, T2, T3, S>(x, y, z, m, begin, end, level, center, gv);                                  \
     }                                                                                                                  \
     template<class Ta, class Tc, class Tmp>                                                                            \
     HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target, const Vec3<Tc>& center,           \

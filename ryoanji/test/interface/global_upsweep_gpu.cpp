@@ -89,7 +89,7 @@ static bool multipoleHolderTest(int thisRank, int numRanks)
 
         // compute reference root cell multipole from global particle data
         MultipoleType reference;
-        P2M(coords.x().data(), coords.y().data(), coords.z().data(), globalMasses.data(), 0, numParticles * numRanks,
+        P2M(coords.x().data(), coords.y().data(), coords.z().data(), globalMasses.data(), 0, numParticles * numRanks, 0,
             centers[0], reference);
 
         double maxDiff = max(abs(reference - globalRootMultipole));

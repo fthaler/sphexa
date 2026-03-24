@@ -62,8 +62,9 @@ static int multipoleExchangeTest(int thisRank, int numRanks)
     //! includes tree plus associated information, like peer ranks, assignment, counts, centers, etc
     const cstone::FocusedOctree<KeyType, T>& focusTree = domain.focusTree();
     //! the focused octree, structure only
-    auto                                         octree  = focusTree.octreeViewAcc();
-    std::span<const cstone::SourceCenterType<T>> centers = focusTree.expansionCentersAcc();
+    auto                                         octree     = focusTree.octreeViewAcc();
+    std::span<const cstone::SourceCenterType<T>> centers    = focusTree.expansionCentersAcc();
+    std::span<const cstone::Vec3<T>>             geoCenters = focusTree.geoCentersAcc();
 
     cstone::SourceCenterType<T> refCenter = cstone::massCenter<T>(
         coords.x().data(), coords.y().data(), coords.z().data(), globalMasses.data(), 0, globalMasses.size());
@@ -77,7 +78,7 @@ static int multipoleExchangeTest(int thisRank, int numRanks)
     // compute reference root cell multipole from global particle data
     MultipoleType reference;
     P2M(coords.x().data(), coords.y().data(), coords.z().data(), globalMasses.data(), 0, numParticles * numRanks, 0,
-        centers[octree.levelRange[0]], reference);
+        centers[octree.levelRange[0]], geoCenters[octree.levelRange[0]], reference);
 
     double maxDiffCe = max(abs(makeVec3(refCenter - centers[0])));
     bool   passCe    = maxDiffCe < 1e-10;

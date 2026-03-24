@@ -29,27 +29,30 @@ void computeMultipoles(const Tc* x, const Tc* y, const Tc* z, const Tm* m, cston
                        const cstone::FocusedOctree<KeyType, Tf, cstone::CpuTag>& focusTree,
                        const cstone::LocalIndex* layout, MType* multipoles)
 {
-    auto let           = focusTree.octreeViewAcc(); // locally essential octree
-    auto centers       = focusTree.expansionCentersAcc();
-    auto globalCenters = focusTree.globalExpansionCenters();
-    auto leaves        = focusTree.treeLeavesAcc();
+    auto let              = focusTree.octreeViewAcc(); // locally essential octree
+    auto centers          = focusTree.expansionCentersAcc();
+    auto geoCenters       = focusTree.geoCentersAcc();
+    auto globalCenters    = focusTree.globalExpansionCenters();
+    auto globalGeoCenters = focusTree.globalGeoCenters();
+    auto leaves           = focusTree.treeLeavesAcc();
 
     std::span multipoleSpan{multipoles, size_t(let.numNodes)};
     ryoanji::computeLeafMultipoles(x, y, z, m, let.leafToInternalSpan(), leaves.data(), layout, centers.data(),
-                                   multipoles);
+                                   geoCenters.data(), multipoles);
 
-    auto upsweep = [](auto levelRange, auto childOffsets, auto M, auto centers)
-    { ryoanji::upsweepMultipoles(levelRange, childOffsets, centers, M); };
+    auto upsweep = [](auto levelRange, auto childOffsets, auto M, auto centers, auto geoCenters)
+    { ryoanji::upsweepMultipoles(levelRange, childOffsets, centers, geoCenters, M); };
 
     //! first upsweep with local data
-    upsweep(let.levelRangeSpan(), let.childOffsets, multipoles, centers.data());
+    upsweep(let.levelRangeSpan(), let.childOffsets, multipoles, centers.data(), geoCenters.data());
 
     std::vector<int, util::DefaultInitAdaptor<int>> scratch;
-    focusTree.globalExchange(gOctree, multipoleSpan, std::span<MType>{}, scratch, upsweep, globalCenters.data());
+    focusTree.globalExchange(gOctree, multipoleSpan, std::span<MType>{}, scratch, upsweep, globalCenters.data(),
+                             globalGeoCenters.data());
     focusTree.peerExchange(multipoleSpan, static_cast<int>(cstone::P2pTags::focusPeerCenters) + 1, scratch);
 
     //! second upsweep with leaf data from peer and global ranks in place
-    upsweep(let.levelRangeSpan(), let.childOffsets, multipoles, centers.data());
+    upsweep(let.levelRangeSpan(), let.childOffsets, multipoles, centers.data(), geoCenters.data());
 }
 
 } // namespace ryoanji

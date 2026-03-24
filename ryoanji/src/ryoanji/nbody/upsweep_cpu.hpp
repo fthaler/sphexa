@@ -42,20 +42,21 @@ namespace ryoanji
 template<class T1, class T2, class KeyType, class MType>
 void computeLeafMultipoles(const T1* x, const T1* y, const T1* z, const T2* m,
                            std::span<const cstone::TreeNodeIndex> leafToInternal, const KeyType* leaves,
-                           const LocalIndex* layout, const cstone::SourceCenterType<T1>* centers, MType* multipoles)
+                           const LocalIndex* layout, const cstone::SourceCenterType<T1>* centers,
+                           const cstone::Vec3<T1>* geoCenters, MType* multipoles)
 {
 #pragma omp parallel for schedule(static)
     for (size_t leafIdx = 0; leafIdx < leafToInternal.size(); ++leafIdx)
     {
         TreeNodeIndex i     = leafToInternal[leafIdx];
         unsigned      level = cstone::treeLevel(leaves[leafIdx + 1] - leaves[leafIdx]);
-        P2M(x, y, z, m, layout[leafIdx], layout[leafIdx + 1], level, centers[i], multipoles[i]);
+        P2M(x, y, z, m, layout[leafIdx], layout[leafIdx + 1], level, centers[i], geoCenters[i], multipoles[i]);
     }
 }
 
 template<class T, class MType>
 void upsweepMultipoles(std::span<const cstone::TreeNodeIndex> levelOffset, const cstone::TreeNodeIndex* childOffsets,
-                       const cstone::SourceCenterType<T>* centers, MType* multipoles)
+                       const cstone::SourceCenterType<T>* centers, const cstone::Vec3<T>* geoCenters, MType* multipoles)
 {
     int currentLevel = levelOffset.size() - 2;
 
@@ -69,7 +70,8 @@ void upsweepMultipoles(std::span<const cstone::TreeNodeIndex> levelOffset, const
             cstone::TreeNodeIndex firstChild = childOffsets[i];
             if (firstChild)
             {
-                M2M(firstChild, firstChild + cstone::eightSiblings, centers[i], centers, multipoles, multipoles[i]);
+                M2M(firstChild, firstChild + cstone::eightSiblings, centers[i], centers, geoCenters[i], geoCenters,
+                    multipoles, multipoles[i]);
             }
         }
     }

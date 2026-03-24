@@ -66,7 +66,8 @@ struct Cqi
  */
 template<int stride, class T1, class T2, class T3>
 HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                             unsigned /* level */, const Vec4<T1>& center, CartesianQuadrupole<T3>& gv)
+                             unsigned /* level */, const Vec4<T1>& center, const Vec3<T1>& /* geoCenter */,
+                             CartesianQuadrupole<T3>& gv)
 {
     for (LocalIndex i = begin; i < end; i += stride)
     {
@@ -109,10 +110,10 @@ HOST_DEVICE_FUN CartesianQuadrupole<T> P2M_finalize(CartesianQuadrupole<T> gv)
 
 template<int stride = 1, class T1, class T2, class T3>
 HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                         unsigned level, const Vec4<T1>& center, CartesianQuadrupole<T3>& gv)
+                         unsigned level, const Vec4<T1>& center, const Vec3<T1>& geoCenter, CartesianQuadrupole<T3>& gv)
 {
     gv = T3(0);
-    P2M_add<stride>(x, y, z, m, begin, end, level, center, gv);
+    P2M_add<stride>(x, y, z, m, begin, end, level, center, geoCenter, gv);
     gv = P2M_finalize(gv);
 }
 
@@ -185,7 +186,8 @@ HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target,
  * Implements formula (2.5) from Hernquist 1987 (parallel axis theorem)
  */
 template<class T, class Tc>
-HOST_DEVICE_FUN void addQuadrupole(CartesianQuadrupole<T>& composite, Vec3<Tc> dX, const CartesianQuadrupole<T>& addend)
+HOST_DEVICE_FUN void addQuadrupole(CartesianQuadrupole<T>& composite, const Vec3<Tc>& dX, const Vec3<Tc>& /* geoDX */,
+                                   const CartesianQuadrupole<T>& addend)
 {
     Tc rx = dX[0];
     Tc ry = dX[1];
@@ -221,22 +223,25 @@ HOST_DEVICE_FUN void addQuadrupole(CartesianQuadrupole<T>& composite, Vec3<Tc> d
  * @param[out]  Mout     the aggregated output multipole
  */
 template<class T, class Tm>
-HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc,
-                         const CartesianQuadrupole<Tm>* Msrc, CartesianQuadrupole<Tm>& Mout)
+HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc, const Vec3<T>& geoXout,
+                         const Vec3<T>* geoXsrc, const CartesianQuadrupole<Tm>* Msrc, CartesianQuadrupole<Tm>& Mout)
 {
     Mout = 0;
     for (int i = begin; i < end; i++)
     {
-        const CartesianQuadrupole<Tm>& Mi = Msrc[i];
-        Vec4<T>                        Xi = Xsrc[i];
-        Vec3<T>                        dX = makeVec3(Xout - Xi);
-        addQuadrupole(Mout, dX, Mi);
+        const CartesianQuadrupole<Tm>& Mi    = Msrc[i];
+        Vec4<T>                        Xi    = Xsrc[i];
+        Vec3<T>                        geoXi = geoXsrc[i];
+        Vec3<T>                        dX    = makeVec3(Xout - Xi);
+        Vec3<T>                        geoDX = geoXout - geoXi;
+        addQuadrupole(Mout, dX, geoDX, Mi);
     }
 }
 
 template<int stride, class T1, class T2, class T3>
 HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                             unsigned /* level */, const Vec4<T1>& center, CartesianMDQpole<T3>& gv)
+                             unsigned /* level */, const Vec4<T1>& center, const Vec3<T1>& /* geoCenter */,
+                             CartesianMDQpole<T3>& gv)
 {
     for (LocalIndex i = begin; i < end; i += stride)
     {
@@ -296,10 +301,10 @@ HOST_DEVICE_FUN CartesianMDQpole<T> P2M_finalize(CartesianMDQpole<T> gv)
  */
 template<int stride = 1, class T1, class T2, class T3>
 HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
-                         unsigned level, const Vec4<T1>& center, CartesianMDQpole<T3>& gv)
+                         unsigned level, const Vec4<T1>& center, const Vec3<T1>& geoCenter, CartesianMDQpole<T3>& gv)
 {
     gv = T3(0);
-    P2M_add<stride>(x, y, z, m, begin, end, level, center, gv);
+    P2M_add<stride>(x, y, z, m, begin, end, level, center, geoCenter, gv);
     gv = P2M_finalize(gv);
 }
 
@@ -357,7 +362,8 @@ HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target,
  * Implements formula (2.5) from Hernquist 1987 (parallel axis theorem)
  */
 template<class T, class Tc>
-HOST_DEVICE_FUN void addQuadrupole(CartesianMDQpole<T>& composite, Vec3<Tc> dX, const CartesianMDQpole<T>& addend)
+HOST_DEVICE_FUN void addQuadrupole(CartesianMDQpole<T>& composite, const Vec3<Tc>& dX, const Vec3<Tc> /* geoDX */,
+                                   const CartesianMDQpole<T>& addend)
 {
     Tc rx = dX[0];
     Tc ry = dX[1];
@@ -402,16 +408,18 @@ HOST_DEVICE_FUN void addQuadrupole(CartesianMDQpole<T>& composite, Vec3<Tc> dX, 
  * @param[out]  Mout     the aggregated output multipole
  */
 template<class T, class Tm>
-HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc, const CartesianMDQpole<Tm>* Msrc,
-                         CartesianMDQpole<Tm>& Mout)
+HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc, const Vec3<T>& geoXout,
+                         const Vec3<T>* geoXsrc, const CartesianMDQpole<Tm>* Msrc, CartesianMDQpole<Tm>& Mout)
 {
     Mout = 0;
     for (int i = begin; i < end; i++)
     {
-        const CartesianMDQpole<Tm>& Mi = Msrc[i];
-        Vec4<T>                     Xi = Xsrc[i];
-        Vec3<T>                     dX = makeVec3(Xout - Xi);
-        addQuadrupole(Mout, dX, Mi);
+        const CartesianMDQpole<Tm>& Mi    = Msrc[i];
+        Vec4<T>                     Xi    = Xsrc[i];
+        Vec3<T>                     geoXi = geoXsrc[i];
+        Vec3<T>                     dX    = makeVec3(Xout - Xi);
+        Vec3<T>                     geoDX = geoXout - geoXi;
+        addQuadrupole(Mout, dX, geoDX, Mi);
     }
 }
 

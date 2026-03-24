@@ -412,6 +412,20 @@ public:
                      scratch1);
         //! upsweep with all (leaf) data in place
         upsweepCenters(octree.levelRangeSpan(), octree.childOffsets, centersAcc_.data());
+
+        //! Compute global geometric centers (no communication needed)
+        reallocate(globalGeoCentersAcc_, gOctree.numNodes, allocGrowthRate_);
+        reallocate(globalGeoSizesAcc_, gOctree.numNodes, allocGrowthRate_); // needed by API but can be discarded
+        if constexpr (HaveGpu<Accelerator>{})
+        {
+            computeGeoCentersGpu(gOctree.prefixes, gOctree.numNodes, rawPtr(globalGeoCentersAcc_),
+                                 rawPtr(globalGeoSizesAcc_), box_);
+        }
+        else
+        {
+            nodeFpCenters<KeyType>({gOctree.prefixes, size_t(gOctree.numNodes)}, globalGeoCentersAcc_.data(),
+                                   globalGeoSizesAcc_.data(), box_);
+        }
     }
 
     /*! @brief Update the MAC criteria based on a min distance MAC
@@ -662,6 +676,11 @@ public:
     {
         return {globalCentersAcc_.data(), globalCentersAcc_.size()};
     }
+    //! @brief Geometric centers of each cell
+    std::span<const Vec3<RealType>> globalGeoCenters() const
+    {
+        return {rawPtr(globalGeoCentersAcc_), globalGeoCentersAcc_.size()};
+    }
 
     //! @brief return a view to the octree on the active accelerator
     OctreeView<const KeyType> octreeViewAcc() const { return octreeAcc_.cdata(); }
@@ -775,6 +794,7 @@ private:
 
     //! @brief we also need to hold on to the expansion centers of the global tree for the multipole upsweep
     AccVector<SourceCenterType<RealType>> globalCentersAcc_;
+    AccVector<Vec3<RealType>> globalGeoCentersAcc_, globalGeoSizesAcc_;
     //! @brief the assignment of peer ranks to tree_.treeLeaves()
     std::vector<TreeIndexPair> assignment_, peerRanges_;
     //! @brief number of global nodes per rank and scan for allgatherv

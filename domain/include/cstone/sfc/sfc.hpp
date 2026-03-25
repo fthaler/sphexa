@@ -36,7 +36,7 @@ using HilbertKey = StrongType<IntegerType, struct HilbertKeyTag>;
 
 //! @brief use this definition to select the kind of space filling curve to use
 template<class IntegerType>
-using SfcKind = HilbertKey<IntegerType>;
+using SfcKind = MortonKey<IntegerType>;
 
 template<class KeyType>
 HOST_DEVICE_FUN SfcKind<KeyType> sfcKey(KeyType key)

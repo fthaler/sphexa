@@ -42,13 +42,17 @@ __global__ void computeLeafMultipolesKernel(const Tc* x, const Tc* y, const Tc* 
     TreeNodeIndex leafIdx = tid / TPL;
     TreeNodeIndex internalIdx;
 
+    constexpr Tf       NaN            = std::numeric_limits<Tf>::signaling_NaN();
+    constexpr Vec4<Tf> dummyCenter    = {NaN, NaN, NaN, NaN};
+    constexpr Vec3<Tc> dummyGeoCenter = {NaN, NaN, NaN};
+
     MType mp_loc;
     mp_loc = 0;
     if (leafIdx < numLeaves)
     {
         internalIdx        = leafToInternal[leafIdx];
-        auto     com       = centers[internalIdx];
-        auto     geoCenter = geoCenters[internalIdx];
+        auto     com       = centers ? centers[internalIdx] : dummyCenter;
+        auto     geoCenter = geoCenters ? geoCenters[internalIdx] : dummyGeoCenter;
         unsigned level     = cstone::treeLevel(leaves[leafIdx + 1] - leaves[leafIdx]);
         P2M_add<TPL>(x, y, z, m, layout[leafIdx] + threadIdx.x % TPL, layout[leafIdx + 1], level, com, geoCenter,
                      mp_loc);

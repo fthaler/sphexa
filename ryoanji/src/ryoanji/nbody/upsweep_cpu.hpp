@@ -45,12 +45,16 @@ void computeLeafMultipoles(const T1* x, const T1* y, const T1* z, const T2* m,
                            const LocalIndex* layout, const cstone::SourceCenterType<T1>* centers,
                            const cstone::Vec3<T1>* geoCenters, MType* multipoles)
 {
+    constexpr T1                           NaN            = std::numeric_limits<T1>::signaling_NaN();
+    constexpr cstone::SourceCenterType<T1> dummyCenter    = {NaN, NaN, NaN, NaN};
+    constexpr cstone::Vec3<T1>             dummyGeoCenter = {NaN, NaN, NaN};
 #pragma omp parallel for schedule(static)
     for (size_t leafIdx = 0; leafIdx < leafToInternal.size(); ++leafIdx)
     {
         TreeNodeIndex i     = leafToInternal[leafIdx];
         unsigned      level = cstone::treeLevel(leaves[leafIdx + 1] - leaves[leafIdx]);
-        P2M(x, y, z, m, layout[leafIdx], layout[leafIdx + 1], level, centers[i], geoCenters[i], multipoles[i]);
+        P2M(x, y, z, m, layout[leafIdx], layout[leafIdx + 1], level, centers ? centers[i] : dummyCenter,
+            geoCenters ? geoCenters[i] : dummyGeoCenter, multipoles[i]);
     }
 }
 

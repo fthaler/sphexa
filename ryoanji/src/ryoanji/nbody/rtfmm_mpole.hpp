@@ -20,6 +20,7 @@
 
 #include "cstone/cuda/errorcheck.cuh"
 #include "cstone/primitives/primitives_gpu.h"
+#include "cstone/primitives/warpscan.cuh"
 #endif
 
 #include "kernel.hpp"
@@ -309,9 +310,70 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
 }
 
 template<unsigned S, class T1, class T2>
+__global__ void rtfmmSetupM2mPointers(TreeNodeIndex numNodes, const TreeNodeIndex* childOffsets,
+                                      const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles,
+                                      RtfmmMultipole<T2, S>* tmp, T2** m2mPtrs, T2** multipolePtrs, T2** tmpPtrs)
+{
+    const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
+
+    TreeNodeIndex i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= numNodes) return;
+
+    multipolePtrs[i] = reinterpret_cast<T2*>(&multipoles[i]);
+    tmpPtrs[i]       = reinterpret_cast<T2*>(&tmp[i]);
+
+    TreeNodeIndex firstChild = childOffsets[i];
+    if (firstChild != 0)
+    {
+        for (int c = 0; c < 8; ++c)
+        {
+            TreeNodeIndex child = firstChild + c;
+            auto          geoDX = geoCenters[i] - geoCenters[child];
+            unsigned octant = unsigned(geoDX[2] < 0) | (unsigned(geoDX[1] < 0) << 1) | (unsigned(geoDX[0] < 0) << 2);
+            m2mPtrs[child]  = const_cast<T2*>(data->m2m[octant]);
+        }
+    }
+}
+
+template<unsigned S, class T2>
+__global__ void rtfmmM2mReduction(TreeNodeIndex firstParent, TreeNodeIndex lastParent,
+                                  const TreeNodeIndex* childOffsets, const RtfmmMultipole<T2, S>* tmp,
+                                  RtfmmMultipole<T2, S>* multipoles)
+{
+    TreeNodeIndex       tid        = blockIdx.x * blockDim.x + threadIdx.x;
+    const TreeNodeIndex parent     = tid / 8 + firstParent;
+    TreeNodeIndex       firstChild = 0;
+
+    if (parent < lastParent) { firstChild = childOffsets[parent]; }
+
+    RtfmmMultipole<T2, S> Mout;
+    Mout = 0;
+
+    if (firstChild)
+    {
+        TreeNodeIndex child = firstChild + threadIdx.x % 8;
+        Mout                = tmp[child];
+    }
+
+#pragma unroll
+    for (int offset = 1; offset < 8; offset *= 2)
+    {
+#pragma unroll
+        for (unsigned mi = 0; mi < S; ++mi)
+            Mout[mi] += cstone::shflDownSync(Mout[mi], offset);
+    }
+
+    if (firstChild && threadIdx.x % 8 == 0) { multipoles[parent] = Mout; }
+}
+
+template<unsigned S, class T1, class T2>
 void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* childOffsets,
               const TreeNodeIndex numNodes, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
 {
+    // TODO: move to outside
+    cublasHandle_t handle;
+    checkCublas(cublasCreate(&handle));
+
     T2 **m2mPtrs, **multipolePtrs, **tmpPtrs;
     checkGpuErrors(cudaMalloc(&m2mPtrs, numNodes * sizeof(T2*)));
     checkGpuErrors(cudaMalloc(&multipolePtrs, numNodes * sizeof(T2*)));
@@ -320,19 +382,47 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
     RtfmmMultipole<T2, S>* tmp;
     checkGpuErrors(cudaMalloc(&tmp, numNodes * sizeof(RtfmmMultipole<T2, S>)));
 
-    // TODO: compute device matrix pointers (m2mPtrs) for each node based on octants; multipolePtrs and tmpPtrs can just
-    // point to start of multipoles for each node
+    // Compute device pointer arrays for M2M matrices, multipoles, and tmp buffers
+    {
+        constexpr int blockSize = 256;
+        int           numBlocks = (numNodes + blockSize - 1) / blockSize;
+        rtfmmSetupM2mPointers<S><<<numBlocks, blockSize>>>(numNodes, childOffsets, geoCenters, multipoles, tmp, m2mPtrs,
+                                                           multipolePtrs, tmpPtrs);
+    }
+
+    T2   alpha       = 1;
+    T2   beta        = 0;
+    auto gemvBatched = []<class... Args>(Args&&... args)
+    {
+        if constexpr (std::is_same_v<T2, double>)
+            return cublasDgemvBatched(std::forward<Args>(args)...);
+        else
+            return cublasSgemvBatched(std::forward<Args>(args)...);
+    };
 
     const int numLevels = levelRange.size() - 1;
     for (int level = numLevels - 1; level > 0; level--)
     {
-        if (levelRange[level + 1] - levelRange[level])
+        int batchCount = levelRange[level + 1] - levelRange[level];
+        if (batchCount)
         {
-            // TODO: batched GEMV with correct m2m matrix of src nodes M in levelRange[level], levelRange[level + 1] to
-            // tmp buffer
+            int offset = levelRange[level];
 
-            // TODO: gathering/summation to target nodes in levelRange[level - 1], levelRange[level] of src nodes result
-            // from temporary buffer into M
+            // Batched GEMV: tmp[i] = M2M_matrix^T * multipoles[i] for source nodes at this level
+            checkCublas(gemvBatched(handle, CUBLAS_OP_T, int(S), int(S), &alpha, (const T2* const*)(m2mPtrs + offset),
+                                    int(S), (const T2* const*)(multipolePtrs + offset), 1, &beta,
+                                    (T2* const*)(tmpPtrs + offset), 1, batchCount));
+
+            // Reduction: sum transformed children into parent multipoles
+            int firstParent = levelRange[level - 1];
+            int lastParent  = levelRange[level];
+            int numParents  = lastParent - firstParent;
+            if (numParents)
+            {
+                constexpr int blockSize = 256;
+                int           numBlocks = (8 * numParents + blockSize - 1) / blockSize;
+                rtfmmM2mReduction<S><<<numBlocks, blockSize>>>(firstParent, lastParent, childOffsets, tmp, multipoles);
+            }
         }
     }
 
@@ -340,6 +430,7 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
     checkGpuErrors(cudaFree(multipolePtrs));
     checkGpuErrors(cudaFree(tmpPtrs));
     checkGpuErrors(cudaFree(tmp));
+    checkCublas(cublasDestroy(handle));
 }
 #endif
 

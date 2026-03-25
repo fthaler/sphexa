@@ -355,10 +355,8 @@ __global__ void rtfmmM2mReduction(TreeNodeIndex firstParent, TreeNodeIndex lastP
         Mout                = tmp[child];
     }
 
-#pragma unroll
     for (int offset = 1; offset < 8; offset *= 2)
     {
-#pragma unroll
         for (unsigned mi = 0; mi < S; ++mi)
             Mout[mi] += cstone::shflDownSync(Mout[mi], offset);
     }

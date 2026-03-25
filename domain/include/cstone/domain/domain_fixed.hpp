@@ -51,8 +51,17 @@ public:
     {
     }
 
-    //! @brief set the SFC domain decomposition boundaries and update the LET structure
-    //! We assume this is called only at the start of a simulation
+    /*! @brief set the SFC domain decomposition boundaries and update the LET structure
+     *
+     * @param[in] boundaries     SFC boundary start of each rank
+     * @param[in] box            global coordinate bounding
+     * @param[in] maxLevel       tree level to refine down to in the local part of the LET
+     * @param[in] theta          refinement angle for the non-local LET parts
+     * @param[in] comm           MPI communicator where rank i starts at boundaries[i]
+     * @param[-]  scratch        buffer temporary scratch usage
+     *
+     * We assume this is called only at the start of a simulation
+     */
     template<class DevVec>
     void setBoundaries(std::span<const KeyType> boundaries,
                        const Box<T>& box,
@@ -61,18 +70,28 @@ public:
                        MPI_Comm comm,
                        DevVec& scratch)
     {
-        comm_ = comm;
-        box_ = box;
-        MPI_Comm_rank(comm, &myRank_);
         MPI_Comm_size(comm, &numRanks_);
 
         std::vector<KeyType> domainBoundaries(numRanks_);
         std::copy(boundaries.begin(), boundaries.end(), domainBoundaries.begin());
-        std::vector<int> ranks(numRanks_);
-        std::iota(ranks.begin(), ranks.end(), 0);
-
-        sort_by_key(domainBoundaries.begin(), domainBoundaries.end(), ranks.begin());
+        std::vector<int> sfcSegmentToRank(numRanks_);
+        std::iota(sfcSegmentToRank.begin(), sfcSegmentToRank.end(), 0);
+        sort_by_key(domainBoundaries.begin(), domainBoundaries.end(), sfcSegmentToRank.begin());
         domainBoundaries.push_back(nodeRange<KeyType>(0));
+
+        {
+            // invert sfcSegmentToRank
+            std::vector<int> rankToSfcSegment(numRanks_);
+            std::iota(rankToSfcSegment.begin(), rankToSfcSegment.end(), 0);
+            sort_by_key(sfcSegmentToRank.begin(), sfcSegmentToRank.end(), rankToSfcSegment.begin());
+
+            int callerRank;
+            MPI_Comm_rank(comm, &callerRank);
+            MPI_Comm_split(comm, 0, rankToSfcSegment[callerRank], &comm_);
+            myRank_ = rankToSfcSegment[callerRank];
+        }
+
+        box_ = box;
 
         /*******************************/
         // Global tree, a low-res tree that resolves the domain boundaries, can be only 1 cell per rank
@@ -92,9 +111,9 @@ public:
         // LET structure build
 
         unsigned bucketSizeFocus = 1; // dummy value
-        FocusedOctree<KeyType, T> focusTree(myRank_, numRanks_, bucketSizeFocus, comm);
+        FocusedOctree<KeyType, T> focusTree(myRank_, numRanks_, bucketSizeFocus, comm_);
 
-        auto invThetaEff = invThetaMinMac(theta); // defines resolution in outside the local subdomain
+        auto invThetaEff = invThetaMinMac(theta);
         focusTree.convergeToLevel(box, assignment_, globalLeaves_, invThetaEff, maxLevel, scratch);
         focusTree_ = std::move(focusTree);
     }

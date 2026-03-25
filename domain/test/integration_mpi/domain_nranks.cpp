@@ -511,21 +511,28 @@ TEST(FocusDomain, fixedBoundaries)
     float theta             = 1.0;
     int maxLevel            = 3;
 
-    std::vector<KeyType> boundaries(numRanks + 1);
-    for (int rank = 0; rank < numRanks; ++rank)
+    std::vector<int> rankToSegment(numRanks);
+    std::iota(rankToSegment.begin(), rankToSegment.end(), 0);
+    rankToSegment[0] = 1;
+    rankToSegment[1] = 0;
+
+    std::vector<KeyType> boundaryRankStart(numRanks);
+    std::vector<KeyType> boundaryRankEnd(numRanks);
+    for (int r = 0; r < numRanks; ++r)
     {
-        boundaries[rank] = rank * (nodeRange<KeyType>(0) / numRanks);
+        int seg              = rankToSegment[r];
+        boundaryRankStart[r] = seg * (nodeRange<KeyType>(0) / numRanks);
+        boundaryRankEnd[r]   = (seg + 1) * (nodeRange<KeyType>(0) / numRanks);
     }
-    boundaries.back() = nodeRange<KeyType>(0);
 
     // identical on all ranks
     RandomCoordinates<Real, SfcKind<KeyType>> coords(numParticles, box, 42);
 
     // locate particles assigned to thisRank
     auto firstAssignedIndex =
-        findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaries[rank]);
+        findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaryRankStart[rank]);
     auto lastAssignedIndex =
-        findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaries[rank + 1]);
+        findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaryRankEnd[rank]);
 
     std::vector<Real> x(coords.x().begin() + firstAssignedIndex, coords.x().begin() + lastAssignedIndex);
     std::vector<Real> y(coords.y().begin() + firstAssignedIndex, coords.y().begin() + lastAssignedIndex);
@@ -535,7 +542,7 @@ TEST(FocusDomain, fixedBoundaries)
     std::vector<Real> s1, s2;
 
     DomainFixed<KeyType, Real> domain;
-    domain.setBoundaries(boundaries, box, maxLevel, theta, comm, s1);
+    domain.setBoundaries(boundaryRankStart, box, maxLevel, theta, comm, s1);
 
     std::vector<KeyType> keys(x.size());
     std::vector<LocalIndex> sfcOrder;

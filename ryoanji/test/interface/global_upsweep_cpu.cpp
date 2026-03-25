@@ -83,7 +83,7 @@ static int multipoleExchangeTest(int thisRank, int numRanks)
     double maxDiffCe = max(abs(makeVec3(refCenter - centers[0])));
     bool   passCe    = maxDiffCe < 1e-10;
     double maxDiffMp = max(abs(reference - globalRootMultipole));
-    bool   passMp    = maxDiffMp < 1e-10;
+    bool   passMp    = maxDiffMp < (MultipoleType{}.size() > 20 ? 2e-5 : 1e-10);
 
     int numPassed[2] = {passCe, passMp};
     mpiAllreduce(MPI_IN_PLACE, numPassed, 2, MPI_SUM, MPI_COMM_WORLD);

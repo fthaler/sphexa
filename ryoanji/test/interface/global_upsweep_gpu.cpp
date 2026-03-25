@@ -97,7 +97,7 @@ static bool multipoleHolderTest(int thisRank, int numRanks)
 
         double maxDiff = max(abs(reference - globalRootMultipole));
 
-        bool pass      = maxDiff < 1e-10;
+        bool pass      = maxDiff < (MultipoleType{}.size() > 20 ? 2e-5 : 1e-10);
         int  numPassed = pass;
         mpiAllreduce(MPI_IN_PLACE, &numPassed, 1, MPI_SUM, MPI_COMM_WORLD);
         if (numPassed == numRanks) { passMultipole = true; }

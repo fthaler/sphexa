@@ -84,8 +84,7 @@ void initSurfacePoints(GlobalData<Tc, T, S>* globalData)
 }
 
 template<class Tc>
-std::tuple<std::vector<Tc>, int, int> getP2pMatrix(const std::vector<cstone::Vec3<Tc>>& xSrc,
-                                                   const std::vector<cstone::Vec3<Tc>>& xTar)
+std::vector<Tc> getP2pMatrix(const std::vector<cstone::Vec3<Tc>>& xSrc, const std::vector<cstone::Vec3<Tc>>& xTar)
 {
     int             numSrc = xSrc.size();
     int             numTar = xTar.size();
@@ -102,7 +101,7 @@ std::tuple<std::vector<Tc>, int, int> getP2pMatrix(const std::vector<cstone::Vec
             matrixP2p[j * numSrc + i] = invr;
         }
     }
-    return {std::move(matrixP2p), numTar, numSrc};
+    return matrixP2p;
 }
 
 template<class Tc>
@@ -232,18 +231,16 @@ template<class Tc, class T, unsigned P, unsigned S = rtfmmSurfacePoints(P)>
 void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
 {
     /* P2M */
-    std::vector<cstone::Vec3<Tc>> xCheckUp = getSurfacePoints(P, r0 * 2.95);
-    std::vector<cstone::Vec3<Tc>> xEquivUp = getSurfacePoints(P, r0 * 1.05);
-    auto [e2cUpPrecompute, m, n]           = getP2pMatrix(xEquivUp, xCheckUp);
-    std::vector<Tc> u, s, vT;
-    svd(m, n, e2cUpPrecompute, u, s, vT);
-    auto utP2mPrecompute    = transpose(m, m, u);
-    auto vP2mPrecompute     = transpose(n, n, vT);
-    auto sinvP2mPrecompute  = pseudoInverse(m, n, s);
-    auto vsinvP2mPrecompute = matMatMul(n, n, m, vP2mPrecompute, sinvP2mPrecompute);
+    std::vector<cstone::Vec3<Tc>> xCheckUp        = getSurfacePoints(P, r0 * 2.95);
+    std::vector<cstone::Vec3<Tc>> xEquivUp        = getSurfacePoints(P, r0 * 1.05);
+    auto                          e2cUpPrecompute = getP2pMatrix(xEquivUp, xCheckUp);
+    std::vector<Tc>               u, s, vT;
+    svd(S, S, e2cUpPrecompute, u, s, vT);
+    auto utP2mPrecompute    = transpose(S, S, u);
+    auto vP2mPrecompute     = transpose(S, S, vT);
+    auto sinvP2mPrecompute  = pseudoInverse(S, S, s);
+    auto vsinvP2mPrecompute = matMatMul(S, S, S, vP2mPrecompute, sinvP2mPrecompute);
 
-    assert(S == m);
-    assert(S == n);
     std::copy_n(utP2mPrecompute.data(), S * S, globalData->uT);
     std::copy_n(vsinvP2mPrecompute.data(), S * S, globalData->vSinv);
 
@@ -254,13 +251,11 @@ void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
 
     for (int octant = 0; octant < 8; octant++)
     {
-        cstone::Vec3<Tc>              offsetChild   = getChildCellX({0, 0, 0}, r0, octant, false);
-        std::vector<cstone::Vec3<Tc>> xEquivChildUp = getSurfacePoints(P, r0 / 2 * 1.05, offsetChild);
-        auto [ce2pcUpPrecompute, mm, nn]            = getP2pMatrix(xEquivChildUp, xCheckUpParent);
-        assert(S == mm);
-        assert(S == nn);
-        auto m1  = matMatMul(m, m, nn, utM2mPrecompute, ce2pcUpPrecompute);
-        auto m2m = matMatMul(n, m, nn, vsinvM2mPrecompute, m1);
+        cstone::Vec3<Tc>              offsetChild       = getChildCellX({0, 0, 0}, r0, octant, false);
+        std::vector<cstone::Vec3<Tc>> xEquivChildUp     = getSurfacePoints(P, r0 / 2 * 1.05, offsetChild);
+        auto                          ce2pcUpPrecompute = getP2pMatrix(xEquivChildUp, xCheckUpParent);
+        auto                          m1                = matMatMul(S, S, S, utM2mPrecompute, ce2pcUpPrecompute);
+        auto                          m2m               = matMatMul(S, S, S, vsinvM2mPrecompute, m1);
         std::copy_n(m2m.data(), S * S, globalData->m2m[octant]);
     }
 }

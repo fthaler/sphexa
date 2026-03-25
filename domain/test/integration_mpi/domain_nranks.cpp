@@ -31,6 +31,8 @@
 #include "cstone/findneighbors.hpp"
 #include "unit/neighbors/all_to_all.hpp"
 
+#include "cstone/domain/domain_fixed.hpp"
+
 using namespace cstone;
 
 template<class KeyType, class T, class DomainType>
@@ -491,4 +493,77 @@ TEST(FocusDomain, randomGaussianGrav)
     MPI_Comm_size(MPI_COMM_WORLD, &nRanks);
 
     randomGaussianGrav<uint64_t, double>(rank, nRanks);
+}
+
+TEST(FocusDomain, fixedBoundaries)
+{
+    int rank = 0, numRanks = 0;
+
+    MPI_Comm comm = MPI_COMM_WORLD;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &numRanks);
+
+    using Real    = double;
+    using KeyType = unsigned;
+
+    Box<Real> box(0, 1);
+    LocalIndex numParticles = 1000 * numRanks;
+    float theta             = 1.0;
+    int maxLevel            = 3;
+
+    std::vector<int> rankToSegment(numRanks);
+    std::iota(rankToSegment.begin(), rankToSegment.end(), 0);
+    rankToSegment[0] = 1;
+    rankToSegment[1] = 0;
+
+    std::vector<KeyType> boundaryRankStart(numRanks);
+    std::vector<KeyType> boundaryRankEnd(numRanks);
+    for (int r = 0; r < numRanks; ++r)
+    {
+        int seg              = rankToSegment[r];
+        boundaryRankStart[r] = seg * (nodeRange<KeyType>(0) / numRanks);
+        boundaryRankEnd[r]   = (seg + 1) * (nodeRange<KeyType>(0) / numRanks);
+    }
+
+    // identical on all ranks
+    RandomCoordinates<Real, SfcKind<KeyType>> coords(numParticles, box, 42);
+
+    // locate particles assigned to thisRank
+    auto firstAssignedIndex =
+        findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaryRankStart[rank]);
+    auto lastAssignedIndex =
+        findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaryRankEnd[rank]);
+
+    std::vector<Real> x(coords.x().begin() + firstAssignedIndex, coords.x().begin() + lastAssignedIndex);
+    std::vector<Real> y(coords.y().begin() + firstAssignedIndex, coords.y().begin() + lastAssignedIndex);
+    std::vector<Real> z(coords.z().begin() + firstAssignedIndex, coords.z().begin() + lastAssignedIndex);
+    std::vector<Real> q(x.size(), 1.0 / x.size());
+
+    std::vector<Real> s1, s2;
+
+    DomainFixed<KeyType, Real> domain;
+    domain.setBoundaries(boundaryRankStart, box, maxLevel, theta, comm, s1);
+
+    std::vector<KeyType> keys(x.size());
+    std::vector<LocalIndex> sfcOrder;
+    domain.sync(keys, x, y, z, q, sfcOrder, std::tie(s1, s2));
+
+    auto ftree     = domain.focusTree();
+    auto ftreeView = ftree.octreeViewAcc();
+
+    std::vector<unsigned> counts(ftreeView.numNodes);
+    scatter<TreeNodeIndex>(ftreeView.leafToInternalSpan(), ftree.leafCountsAcc().data(), counts.data());
+    upsweep(ftreeView.levelRangeSpan(), ftreeView.childOffsets, counts.data(), NodeCount<unsigned>{});
+    ftree.peerExchange<unsigned>(counts, static_cast<int>(P2pTags::focusPeerCenters) + 2, s1);
+
+    auto upsweepCnt = [](auto levelRange, auto childOffsets, auto Q)
+    { upsweep(levelRange, childOffsets, Q, NodeCount<unsigned>{}); };
+
+    auto gOctree = domain.globalTree();
+    ftree.globalExchange<unsigned>(gOctree, counts, std::span<unsigned>{}, s1, upsweepCnt);
+
+    upsweep(ftreeView.levelRangeSpan(), ftreeView.childOffsets, counts.data(), NodeCount<unsigned>{});
+
+    EXPECT_EQ(numParticles, counts[0]);
+    EXPECT_TRUE(std::is_sorted(keys.begin(), keys.end()));
 }

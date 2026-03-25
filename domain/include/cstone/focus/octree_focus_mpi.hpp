@@ -111,12 +111,6 @@ public:
 
         KeyType focusStart = assignment[myRank_];
         KeyType focusEnd   = assignment[myRank_ + 1];
-        // init on first call
-        if (prevFocusStart == 0 && prevFocusEnd == 0)
-        {
-            prevFocusStart = focusStart;
-            prevFocusEnd   = focusEnd;
-        }
 
         std::span enforcedKeys = globalLeaves.subspan(assignment.treeOffsetsConst()[myRank_],
                                                       assignment.numNodesPerRankConst()[myRank_] + 1);
@@ -168,11 +162,24 @@ public:
          *  the bounding box invalidates the expansion centers (centersAcc_)
          */
         box_             = box;
-        prevFocusStart   = focusStart;
-        prevFocusEnd     = focusEnd;
         rebalanceStatus_ = invalid;
         updateGeoCenters();
         return converged;
+    }
+
+    void computeLocalCounts(std::span<const KeyType> particleKeys)
+    {
+        reallocate(octreeAcc_.numLeafNodes, allocGrowthRate_, leafCountsAcc_);
+        if constexpr (HaveGpu<Accelerator>{})
+        {
+            computeNodeCountsGpu(rawPtr(leavesAcc_), rawPtr(leafCountsAcc_), octreeAcc_.numLeafNodes, particleKeys,
+                                 std::numeric_limits<unsigned>::max(), false);
+        }
+        else
+        {
+            computeNodeCounts<KeyType>(leaves_.data(), leafCountsAcc_.data(), nNodes(leaves_), particleKeys,
+                                       std::numeric_limits<unsigned>::max(), true);
+        }
     }
 
     /*! @brief Perform a global update of the tree structure
@@ -496,16 +503,15 @@ public:
         TreeNodeIndex fAssignStart = findNodeAbove(rawPtr(leaves_), nNodes(leaves_), assignment[myRank_]);
         TreeNodeIndex fAssignEnd   = findNodeAbove(rawPtr(leaves_), nNodes(leaves_), assignment[myRank_ + 1]);
 
+        if (not accumulate) { fill<useGpu>(macsAcc_.begin(), macsAcc_.end(), 0); }
         if constexpr (HaveGpu<Accelerator>{})
         {
-            if (not accumulate) { fillGpu(rawPtr(macsAcc_), rawPtr(macsAcc_) + macsAcc_.size(), uint8_t(0)); }
             markMacsGpu(rawPtr(octreeAcc_.prefixes), rawPtr(octreeAcc_.childOffsets), rawPtr(octreeAcc_.parents),
                         rawPtr(centersAcc_), box_, rawPtr(leavesAcc_) + fAssignStart, fAssignEnd - fAssignStart, false,
                         rawPtr(macsAcc_));
         }
         else
         {
-            if (not accumulate) { std::fill(rawPtr(macsAcc_), rawPtr(macsAcc_) + macsAcc_.size(), uint8_t(0)); }
             markMacs(rawPtr(octreeAcc_.prefixes), rawPtr(octreeAcc_.childOffsets), rawPtr(octreeAcc_.parents),
                      rawPtr(centersAcc_), box_, rawPtr(leaves_) + fAssignStart, fAssignEnd - fAssignStart, false,
                      rawPtr(macsAcc_));
@@ -611,6 +617,40 @@ public:
             updateGeoCenters();
             MPI_Allreduce(MPI_IN_PLACE, &converged, 1, MPI_INT, MPI_SUM, comm_);
         }
+    }
+
+    //! @brief update until converged to uniform @p maxLevel inside the local focus and min-distance MAC decay outside
+    template<class DeviceVector = std::vector<KeyType>>
+    void convergeToLevel(const Box<RealType>& box,
+                         const SfcAssignment<KeyType>& assignment,
+                         std::span<const KeyType> globalTreeLeaves,
+                         float invThetaEff,
+                         int maxLevel,
+                         DeviceVector&& scratch = std::vector<KeyType>{})
+    {
+        int converged = 0;
+        while (converged != numRanks_)
+        {
+            updateMinMac(assignment, invThetaEff, false);
+            converged = updateTree(assignment, globalTreeLeaves, box, scratch);
+            reallocateDestructive(countsAcc_, octreeAcc_.numNodes, allocGrowthRate_);
+            if constexpr (useGpu)
+            {
+                synthCountsMaxLevelGpu(
+                    std::span<const KeyType>{octreeAcc_.prefixes.data(), size_t(octreeAcc_.numNodes)},
+                    countsAcc_.data(), bucketSize_, maxLevel);
+            }
+            else
+            {
+                synthCountsMaxLevel(std::span<const KeyType>{octreeAcc_.prefixes.data(), size_t(octreeAcc_.numNodes)},
+                                    countsAcc_.data(), bucketSize_, maxLevel);
+            }
+            rebalanceStatus_ |= countsCriterion;
+            updateGeoCenters();
+            MPI_Allreduce(MPI_IN_PLACE, &converged, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        }
+        reallocate(macsAcc_, octreeAcc_.numNodes, allocGrowthRate_);
+        fill<useGpu>(macsAcc_.begin(), macsAcc_.end(), 0);
     }
 
     /*! @brief exchange data of non-peer (beyond focus) tree cells
@@ -777,11 +817,6 @@ private:
     //! @brief leaves in cstone format for tree_
     std::vector<KeyType> leaves_;
     AccVector<KeyType> leavesAcc_;
-
-    //! @brief previous iteration focus start
-    KeyType prevFocusStart = 0;
-    //! @brief previous iteration focus end
-    KeyType prevFocusEnd = 0;
 
     //! @brief particle counts of the focused tree leaves, tree_.treeLeaves()
     AccVector<unsigned> leafCountsAcc_;

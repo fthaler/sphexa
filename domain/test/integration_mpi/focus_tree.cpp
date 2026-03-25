@@ -136,3 +136,53 @@ TEST(OctreeFocusLET, randomGaussian)
     globalRandomGaussian<uint64_t, double>(rank, nRanks);
     globalRandomGaussian<unsigned, float>(rank, nRanks);
 }
+
+template<class KeyType, class T>
+void maxLevelRefinement(int thisRank, int numRanks)
+{
+    unsigned bucketSizeLocal = 16;
+    float theta              = 10;
+    int maxLevel             = 5;
+    float invThetaEff        = invThetaMinMac(theta);
+
+    Box<T> box{-1, 1};
+
+    /*******************************/
+    // Set up domain boundaries and minimally branching tree on top
+
+    std::vector<KeyType> domainBoundaries(numRanks + 1);
+    for (int rank = 0; rank < numRanks; ++rank)
+    {
+        domainBoundaries[rank] = rank * (nodeRange<KeyType>(0) / numRanks);
+    }
+    domainBoundaries.back() = nodeRange<KeyType>(0);
+
+    auto globalLeaves = computeSpanningTree<KeyType>(domainBoundaries);
+
+    OctreeData<KeyType, CpuTag> domainTree;
+    domainTree.resize(nNodes(globalLeaves));
+    updateInternalTree<KeyType>(globalLeaves, domainTree.data());
+
+    std::vector<unsigned> dummyCounts(nNodes(globalLeaves), 1);
+    auto assignment = makeSfcAssignment(numRanks, dummyCounts, globalLeaves.data());
+
+    /*******************************/
+
+    FocusedOctree<KeyType, T> focusTree(thisRank, numRanks, bucketSizeLocal);
+    std::vector<int, util::DefaultInitAdaptor<int>> scratch;
+    focusTree.convergeToLevel(box, assignment, globalLeaves, invThetaEff, maxLevel, scratch);
+
+    TreeNodeIndex globalNumLeafNodes = 1 << (3 * maxLevel);
+    EXPECT_GE(focusTree.octreeViewAcc().numLeafNodes, globalNumLeafNodes / numRanks);
+    EXPECT_LE(focusTree.octreeViewAcc().numLeafNodes, globalNumLeafNodes);
+    std::cout << thisRank << ": " << focusTree.octreeViewAcc().numLeafNodes << std::endl;
+}
+
+TEST(OctreeFocusLET, uniformMaxLevel)
+{
+    int rank = 0, nRanks = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &nRanks);
+
+    maxLevelRefinement<unsigned, float>(rank, nRanks);
+}

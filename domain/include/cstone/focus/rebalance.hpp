@@ -72,13 +72,15 @@ HOST_DEVICE_FUN int mergeCountAndMacOp(TreeNodeIndex nodeIdx,
     return 1; // default: do nothing
 }
 
-//! @brief refine nodes based on Mac only
+//! @brief return synthetic count that will cause refinement to the specified level @p maxLevel
 template<class KeyType>
-HOST_DEVICE_FUN int macRefineOp(KeyType nodeKey, char mac)
+HOST_DEVICE_FUN LocalIndex synthCountOp(KeyType nodeKey, unsigned bucketSize, int maxLevel)
 {
     unsigned level = decodePrefixLength(nodeKey) / 3;
-    if (level < maxTreeLevel<KeyType>{} && mac) { return 8; }
-    return 1;
+
+    if (level < maxLevel) return 2 * bucketSize; // split
+    if (level == maxLevel) return bucketSize;    // do nothing
+    return 0;                                    // merge
 }
 
 /*! @brief Overrides a 0-value of nodeOps[nodeIdx] if @p nodeIdx is the left-most descendant of a non-zero ancestor
@@ -150,6 +152,24 @@ void rebalanceDecisionEssential(std::span<const KeyType> nodeKeys,
     {
         nodeOps[i] = mergeCountAndMacOp(i, nodeKeys.data(), childOffsets, parents, counts, macs, focusStart, focusEnd,
                                         bucketSize);
+    }
+}
+
+/*! @brief compute synthetic counts that will produce a uniform tree with depth @p maxLevel
+ *
+ * @tparam KeyType
+ * @param nodeKeys    warren-salmon SFC keys for each tree cell, including internal
+ * @param counts      particle counts of each tree node, length = nodeKeys.size()
+ * @param bucketSize  refinement count criterion (Ncrit)
+ * @param maxLevel    desired level to refine to
+ */
+template<class KeyType>
+void synthCountsMaxLevel(std::span<const KeyType> nodeKeys, unsigned* counts, unsigned bucketSize, int maxLevel)
+{
+#pragma omp parallel for
+    for (std::size_t i = 0; i < nodeKeys.size(); ++i)
+    {
+        counts[i] = synthCountOp(nodeKeys[i], bucketSize, maxLevel);
     }
 }
 

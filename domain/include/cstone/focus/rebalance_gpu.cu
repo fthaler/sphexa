@@ -71,38 +71,29 @@ REBA_DEC_ESS_GPU(uint32_t);
 REBA_DEC_ESS_GPU(uint64_t);
 
 template<class KeyType>
-__global__ void macRefineDecisionKernel(const KeyType* prefixes,
-                                        const uint8_t* macs,
-                                        const TreeNodeIndex* l2i,
-                                        TreeNodeIndex numLeafNodes,
-                                        int2 focus,
-                                        TreeNodeIndex* nodeOps)
+__global__ void synthCountsMaxLevelKernel(
+    const KeyType* prefixes, TreeNodeIndex numNodes, unsigned* counts, unsigned bucketSize, int maxLevel)
 {
     unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= numLeafNodes) { return; }
-
-    if (i < focus.x || i >= focus.y) { nodeOps[i] = macRefineOp(prefixes[l2i[i]], macs[l2i[i]]); }
-    else { nodeOps[i] = 1; }
+    if (i >= numNodes) { return; }
+    counts[i] = synthCountOp(prefixes[i], bucketSize, maxLevel);
 }
 
 template<class KeyType>
-void macRefineDecisionGpu(const KeyType* prefixes,
-                          const uint8_t* macs,
-                          const TreeNodeIndex* l2i,
-                          TreeNodeIndex numLeafNodes,
-                          TreeIndexPair focus,
-                          TreeNodeIndex* nodeOps)
+void synthCountsMaxLevelGpu(std::span<const KeyType> nodeKeys, unsigned* counts, unsigned bucketSize, int maxLevel)
 {
     constexpr unsigned numThreads = 256;
-    macRefineDecisionKernel<<<iceil(numLeafNodes, numThreads), numThreads>>>(prefixes, macs, l2i, numLeafNodes,
-                                                                             {focus.start(), focus.end()}, nodeOps);
+    TreeNodeIndex numNodes        = nodeKeys.size();
+    synthCountsMaxLevelKernel<<<iceil(numNodes, numThreads), numThreads>>>(nodeKeys.data(), nodeKeys.size(), counts,
+                                                                           bucketSize, maxLevel);
 }
 
-#define MAC_REF_DEC_GPU(KeyType)                                                                                       \
-    template void macRefineDecisionGpu(const KeyType* prefixes, const uint8_t* macs, const TreeNodeIndex* l2i,         \
-                                       TreeNodeIndex numLeafNodes, TreeIndexPair focus, TreeNodeIndex* nodeOps)
-MAC_REF_DEC_GPU(uint32_t);
-MAC_REF_DEC_GPU(uint64_t);
+#define SYNTH_COUNTS_MAX_LEVEL_GPU(KeyType)                                                                            \
+    template void synthCountsMaxLevelGpu(std::span<const KeyType> nodeKeys, unsigned* counts, unsigned bucketSize,     \
+                                         int maxLevel)
+
+SYNTH_COUNTS_MAX_LEVEL_GPU(uint32_t);
+SYNTH_COUNTS_MAX_LEVEL_GPU(uint64_t);
 
 __device__ int nodeOpSum;
 __global__ void resetNodeOpSum() { nodeOpSum = 0; }

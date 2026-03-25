@@ -35,22 +35,17 @@ extern void rebalanceDecisionEssentialGpu(const KeyType* prefixes,
                                           TreeNodeIndex* nodeOps,
                                           TreeNodeIndex numNodes);
 
-/*! @brief Take decision how to refine nodes based on Macs
+/*! @brief compute synthetic counts that will produce a uniform tree with depth @p maxLevel
  *
- * @param[in]  prefixes       WS-SFC key of each node, length numNodes
- * @param[in]  macs           mac evaluation result flags, length numNodes
- * @param[in]  l2i            translates indices in [0:numLeafNodes] to [0:numNodes] to access prefixes and macs
- * @param[in]  numLeafNodes   number of leaf nodes
- * @param[in]  focus          index range within [0:numLeafNodes] that corresponds to nodes in focus
- * @param[out] nodeOps        output refinement decision per leaf node
+ * @tparam KeyType
+ * @param nodeKeys    warren-salmon SFC keys for each tree cell, including internal
+ * @param counts      particle counts of each tree node, length = nodeKeys.size()
+ * @param bucketSize  refinement count criterion (Ncrit)
+ * @param maxLevel    desired level to refine to
  */
 template<class KeyType>
-extern void macRefineDecisionGpu(const KeyType* prefixes,
-                                 const uint8_t* macs,
-                                 const TreeNodeIndex* l2i,
-                                 TreeNodeIndex numLeafNodes,
-                                 TreeIndexPair focus,
-                                 TreeNodeIndex* nodeOps);
+extern void
+synthCountsMaxLevelGpu(std::span<const KeyType> nodeKeys, unsigned* counts, unsigned bucketSize, int maxLevel);
 
 template<class KeyType>
 extern bool protectAncestorsGpu(const KeyType*, const TreeNodeIndex*, TreeNodeIndex*, TreeNodeIndex);

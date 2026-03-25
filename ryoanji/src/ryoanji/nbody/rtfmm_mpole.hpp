@@ -33,7 +33,7 @@ template<class Tc, class T, unsigned S>
 struct GlobalData
 {
     Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
-    T  uT[S * S], vSinv[S * S];
+    T  vSinvUT[S * S];
     T  m2m[8][S * S];
     T  r0;
 };
@@ -101,19 +101,11 @@ HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)
     {
         T tmpi = 0;
         for (unsigned j = 0; j < S; ++j)
-            tmpi += data->uT[i * S + j] * gv[j];
+            tmpi += data->vSinvUT[i * S + j] * gv[j];
         tmp[i] = tmpi;
     }
 
-    for (unsigned i = 0; i < S; ++i)
-    {
-        T gvi = 0;
-        for (unsigned j = 0; j < S; ++j)
-            gvi += data->vSinv[i * S + j] * tmp[j];
-        gv[i] = gvi;
-    }
-
-    return gv;
+    return tmp;
 }
 
 template<int stride = 1, class T1, class T2, class T3, unsigned S>
@@ -297,9 +289,7 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
         else
             return cublasSgemm(std::forward<Args>(args)...);
     };
-    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->uT, S, qEquivAllDevice, S, &beta,
-                     qEquivAllDevice, S));
-    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, qEquivAllDevice, S,
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinvUT, S, qEquivAllDevice, S,
                      &beta, qEquivAllDevice, S));
 
     cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),

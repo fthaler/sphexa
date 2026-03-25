@@ -151,12 +151,16 @@ template<class T, unsigned S, class Tm>
 HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc, const Vec3<T>& geoXout,
                          const Vec3<T>* geoXsrc, const RtfmmMultipole<Tm, S>* Msrc, RtfmmMultipole<Tm, S>& Mout)
 {
+    constexpr T               NaN          = std::numeric_limits<T>::signaling_NaN();
+    constexpr cstone::Vec4<T> dummyXsrc    = {NaN, NaN, NaN, NaN};
+    constexpr cstone::Vec3<T> dummyGeoXsrc = {NaN, NaN, NaN};
+
     Mout = 0;
     for (int i = begin; i < end; i++)
     {
         const RtfmmMultipole<Tm, S>& Mi    = Msrc[i];
-        Vec4<T>                      Xi    = Xsrc[i];
-        Vec3<T>                      geoXi = geoXsrc[i];
+        Vec4<T>                      Xi    = Xsrc ? Xsrc[i] : dummyXsrc;
+        Vec3<T>                      geoXi = geoXsrc ? geoXsrc[i] : dummyGeoXsrc;
         Vec3<T>                      dX    = makeVec3(Xout - Xi);
         Vec3<T>                      geoDX = geoXout - geoXi;
         addQuadrupole<Tm, S, T>(Mout, dX, geoDX, Mi);

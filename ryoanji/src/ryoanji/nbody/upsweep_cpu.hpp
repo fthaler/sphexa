@@ -62,6 +62,10 @@ template<class T, class MType>
 void upsweepMultipoles(std::span<const cstone::TreeNodeIndex> levelOffset, const cstone::TreeNodeIndex* childOffsets,
                        const cstone::SourceCenterType<T>* centers, const cstone::Vec3<T>* geoCenters, MType* multipoles)
 {
+    constexpr T                           NaN            = std::numeric_limits<T>::signaling_NaN();
+    constexpr cstone::SourceCenterType<T> dummyCenter    = {NaN, NaN, NaN, NaN};
+    constexpr cstone::Vec3<T>             dummyGeoCenter = {NaN, NaN, NaN};
+
     int currentLevel = levelOffset.size() - 2;
 
     for (; currentLevel >= 0; --currentLevel)
@@ -74,8 +78,8 @@ void upsweepMultipoles(std::span<const cstone::TreeNodeIndex> levelOffset, const
             cstone::TreeNodeIndex firstChild = childOffsets[i];
             if (firstChild)
             {
-                M2M(firstChild, firstChild + cstone::eightSiblings, centers[i], centers, geoCenters[i], geoCenters,
-                    multipoles, multipoles[i]);
+                M2M(firstChild, firstChild + cstone::eightSiblings, centers ? centers[i] : dummyCenter, centers,
+                    geoCenters ? geoCenters[i] : dummyGeoCenter, geoCenters, multipoles, multipoles[i]);
             }
         }
     }

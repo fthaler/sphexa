@@ -79,12 +79,11 @@ public:
                                   octree_.numLeafNodes, layout_, centers_, geoCenters, rawPtr(multipoles_));
         }
 
-        auto upsweepGpu = [&](auto levelRange, auto childOffsets, auto M, auto centers, auto geoCenters)
+        auto upsweepGpu = [](auto levelRange, auto childOffsets, auto M, auto centers, auto geoCenters)
         {
             if constexpr (isRtfmm)
             {
-                rtfmmM2M<MType{}.size()>(levelRange, childOffsets, octree_.numInternalNodes + octree_.numLeafNodes,
-                                         geoCenters, M);
+                rtfmmM2M<MType{}.size()>(levelRange, childOffsets, levelRange.back(), geoCenters, M);
             }
             else
             {

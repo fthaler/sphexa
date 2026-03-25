@@ -340,28 +340,26 @@ __global__ void rtfmmM2mReduction(TreeNodeIndex firstParent, TreeNodeIndex lastP
                                   const TreeNodeIndex* childOffsets, const RtfmmMultipole<T2, S>* tmp,
                                   RtfmmMultipole<T2, S>* multipoles)
 {
-    TreeNodeIndex       tid        = blockIdx.x * blockDim.x + threadIdx.x;
-    const TreeNodeIndex parent     = tid / 8 + firstParent;
-    TreeNodeIndex       firstChild = 0;
+    const int bidx  = blockIdx.x;
+    const int tidx  = threadIdx.x;
+    const int thNum = blockDim.x;
 
-    if (parent < lastParent) { firstChild = childOffsets[parent]; }
+    const TreeNodeIndex parent     = bidx + firstParent;
+    const TreeNodeIndex firstChild = childOffsets[parent];
+    if (!firstChild) return;
 
-    RtfmmMultipole<T2, S> Mout;
-    Mout = 0;
+    auto& output = multipoles[parent];
 
-    if (firstChild)
+    for (int i = tidx; i < S; i += thNum)
     {
-        TreeNodeIndex child = firstChild + threadIdx.x % 8;
-        Mout                = tmp[child];
+        T2 sum = 0;
+        for (int j = 0; j < 8; j++)
+        {
+            auto y = tmp[firstChild + j][i];
+            sum += y;
+        }
+        output[i] = sum;
     }
-
-    for (int offset = 1; offset < 8; offset *= 2)
-    {
-        for (unsigned mi = 0; mi < S; ++mi)
-            Mout[mi] += cstone::shflDownSync(Mout[mi], offset);
-    }
-
-    if (firstChild && threadIdx.x % 8 == 0) { multipoles[parent] = Mout; }
 }
 
 template<unsigned S, class T1, class T2>
@@ -413,8 +411,8 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
             int numParents  = lastParent - firstParent;
             if (numParents)
             {
-                constexpr int blockSize = 256;
-                int           numBlocks = (8 * numParents + blockSize - 1) / blockSize;
+                constexpr int blockSize = std::min(S, 1024u);
+                int           numBlocks = numParents;
                 rtfmmM2mReduction<S><<<numBlocks, blockSize>>>(firstParent, lastParent, childOffsets, tmp, multipoles);
             }
         }

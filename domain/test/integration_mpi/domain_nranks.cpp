@@ -513,8 +513,11 @@ TEST(FocusDomain, fixedBoundaries)
 
     std::vector<int> rankToSegment(numRanks);
     std::iota(rankToSegment.begin(), rankToSegment.end(), 0);
-    rankToSegment[0] = 1;
-    rankToSegment[1] = 0;
+    if (numRanks > 1)
+    {
+        rankToSegment[0] = 1;
+        rankToSegment[1] = 0;
+    }
 
     std::vector<KeyType> boundaryRankStart(numRanks);
     std::vector<KeyType> boundaryRankEnd(numRanks);

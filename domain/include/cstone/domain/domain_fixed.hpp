@@ -111,10 +111,10 @@ public:
         // LET structure build
 
         unsigned bucketSizeFocus = 1; // dummy value
-        FocusedOctree<KeyType, T> focusTree(myRank_, numRanks_, bucketSizeFocus, comm_);
+        FocusedOctree<KeyType, T, Accelerator> focusTree(myRank_, numRanks_, bucketSizeFocus, comm_);
 
         auto invThetaEff = invThetaMinMac(theta);
-        focusTree.convergeToLevel(box, assignment_, globalLeaves_, invThetaEff, maxLevel, scratch);
+        focusTree.convergeToLevel(box, assignment_, globalLeavesAcc_, invThetaEff, maxLevel, scratch);
         focusTree_ = std::move(focusTree);
     }
 
@@ -136,7 +136,7 @@ public:
               std::tuple<Vectors&...> scratchBuffers)
     {
         staticChecks<KeyVec, VectorX, Vectors...>(scratchBuffers);
-        checkSizesEqual(x.size(), keys, x, y, z);
+        checkSizesEqual(x.size(), keys, x, y, z, q);
         LocalIndex numParticles = x.size();
         bufDesc_ = {0, numParticles, numParticles};
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratchBuffers);
@@ -180,8 +180,8 @@ public:
 
         if constexpr (useGpu)
         {
-            exclusiveScanGpu(leafCounts.begin() + letLocalRange.start(), leafCounts.begin() + letLocalRange.end(),
-                             layoutAcc_.begin() + letLocalRange.start(), LocalIndex(0));
+            exclusiveScanGpu(leafCounts.data() + letLocalRange.start(), leafCounts.data() + letLocalRange.end(),
+                             layoutAcc_.data() + letLocalRange.start(), LocalIndex(0));
         }
         else
         {

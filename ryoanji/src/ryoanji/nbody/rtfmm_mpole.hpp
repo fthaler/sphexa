@@ -380,7 +380,6 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
     RtfmmMultipole<T2, S>* tmp;
     checkGpuErrors(cudaMalloc(&tmp, numNodes * sizeof(RtfmmMultipole<T2, S>)));
 
-    // Compute device pointer arrays for M2M matrices, multipoles, and tmp buffers
     {
         constexpr int blockSize = 256;
         int           numBlocks = (numNodes + blockSize - 1) / blockSize;
@@ -406,12 +405,9 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
         {
             int offset = levelRange[level];
 
-            // Batched GEMV: tmp[i] = M2M_matrix^T * multipoles[i] for source nodes at this level
-            checkCublas(gemvBatched(handle, CUBLAS_OP_T, int(S), int(S), &alpha, (const T2* const*)(m2mPtrs + offset),
-                                    int(S), (const T2* const*)(multipolePtrs + offset), 1, &beta,
-                                    (T2* const*)(tmpPtrs + offset), 1, batchCount));
+            checkCublas(gemvBatched(handle, CUBLAS_OP_T, S, S, &alpha, m2mPtrs + offset, S, multipolePtrs + offset, 1,
+                                    &beta, tmpPtrs + offset, 1, batchCount));
 
-            // Reduction: sum transformed children into parent multipoles
             int firstParent = levelRange[level - 1];
             int lastParent  = levelRange[level];
             int numParents  = lastParent - firstParent;

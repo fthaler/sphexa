@@ -231,8 +231,8 @@ template<class Tc, class T, unsigned P, unsigned S = rtfmmSurfacePoints(P)>
 void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
 {
     /* P2M */
-    std::vector<cstone::Vec3<Tc>> xCheckUp        = getSurfacePoints(P, r0 * 2.95);
-    std::vector<cstone::Vec3<Tc>> xEquivUp        = getSurfacePoints(P, r0 * 1.05);
+    std::vector<cstone::Vec3<Tc>> xCheckUp        = getSurfacePoints<Tc>(P, r0 * 2.95);
+    std::vector<cstone::Vec3<Tc>> xEquivUp        = getSurfacePoints<Tc>(P, r0 * 1.05);
     auto                          e2cUpPrecompute = getP2pMatrix(xEquivUp, xCheckUp);
     std::vector<Tc>               u, s, vT;
     svd(S, S, e2cUpPrecompute, u, s, vT);
@@ -251,8 +251,8 @@ void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
 
     for (int octant = 0; octant < 8; octant++)
     {
-        cstone::Vec3<Tc>              offsetChild       = getChildCellX({0, 0, 0}, r0, octant, false);
-        std::vector<cstone::Vec3<Tc>> xEquivChildUp     = getSurfacePoints(P, r0 / 2 * 1.05, offsetChild);
+        cstone::Vec3<Tc>              offsetChild       = getChildCellX<Tc>({0, 0, 0}, r0, octant, false);
+        std::vector<cstone::Vec3<Tc>> xEquivChildUp     = getSurfacePoints<Tc>(P, r0 / 2 * 1.05, offsetChild);
         auto                          ce2pcUpPrecompute = getP2pMatrix(xEquivChildUp, xCheckUpParent);
         auto                          m1                = matMatMul(S, S, S, utM2mPrecompute, ce2pcUpPrecompute);
         auto                          m2m               = matMatMul(S, S, S, vsinvM2mPrecompute, m1);
@@ -280,5 +280,6 @@ void rtfmmInit(Tc r0)
 }
 
 template void rtfmmInit<double, double, 5>(double);
+template void rtfmmInit<float, float, 5>(float);
 
 } // namespace ryoanji

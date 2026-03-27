@@ -240,6 +240,8 @@ void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
     auto vP2mPrecompute     = transpose(S, S, vT);
     auto sinvP2mPrecompute  = pseudoInverse(S, S, s);
     auto vsinvP2mPrecompute = matMatMul(S, S, S, vP2mPrecompute, sinvP2mPrecompute);
+    std::copy_n(utP2mPrecompute.data(), S * S, globalData->UT);
+    std::copy_n(vsinvP2mPrecompute.data(), S * S, globalData->vSinv);
 
     auto vsinvUtP2mPrecompute = matMatMul(S, S, S, vsinvP2mPrecompute, utP2mPrecompute);
     std::copy_n(vsinvUtP2mPrecompute.data(), S * S, globalData->vSinvUT);

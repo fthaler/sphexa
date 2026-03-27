@@ -33,6 +33,8 @@ template<class Tc, class T, unsigned S>
 struct GlobalData
 {
     Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
+    T UT[S * S];
+    T vSinv[S * S];
     T  vSinvUT[S * S];
     T  m2m[8][S * S];
     T  r0;
@@ -101,11 +103,18 @@ HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)
     {
         T tmpi = 0;
         for (unsigned j = 0; j < S; ++j)
-            tmpi += data->vSinvUT[i * S + j] * gv[j];
+            tmpi += data->UT[i * S + j] * gv[j];
         tmp[i] = tmpi;
     }
+    for (unsigned i = 0; i < S; ++i)
+    {
+        T gvi = 0;
+        for (unsigned j = 0; j < S; ++j)
+            gvi += data->vSinv[i * S + j] * tmp[j];
+        gv[i] = gvi;
+    }
 
-    return tmp;
+    return gv;
 }
 
 template<int stride = 1, class T1, class T2, class T3, unsigned S>
@@ -126,8 +135,8 @@ HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target,
 }
 
 template<class T, unsigned S, class Tc>
-HOST_DEVICE_FUN void addQuadrupole(RtfmmMultipole<T, S>& composite, const Vec3<Tc>& dX, const Vec3<Tc>& geoDX,
-                                   const RtfmmMultipole<T, S>& addend)
+HOST_DEVICE_FUN void addMultipole(RtfmmMultipole<T, S>& composite, const Vec3<Tc>& dX, const Vec3<Tc>& geoDX,
+                                  const RtfmmMultipole<T, S>& addend)
 {
 #ifdef __CUDA_ARCH__
     const GlobalData<Tc, T, S>* data = reinterpret_cast<const GlobalData<Tc, T, S>*>(globalDataDevice);
@@ -163,7 +172,7 @@ HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>*
         Vec3<T>                      geoXi = geoXsrc ? geoXsrc[i] : dummyGeoXsrc;
         Vec3<T>                      dX    = makeVec3(Xout - Xi);
         Vec3<T>                      geoDX = geoXout - geoXi;
-        addQuadrupole<Tm, S, T>(Mout, dX, geoDX, Mi);
+        addMultipole<Tm, S, T>(Mout, dX, geoDX, Mi);
     }
 }
 

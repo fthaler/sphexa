@@ -372,6 +372,19 @@ std::span<const TreeNodeIndex> leafToInternal(const OctreeData<KeyType, Accelera
     return {rawPtr(octree.leafToInternal) + octree.numInternalNodes, size_t(octree.numLeafNodes)};
 }
 
+template<class KeyType>
+void downloadOctreeFromGpu(OctreeData<KeyType, CpuTag>& octree, OctreeView<const KeyType> gpuOctreeView)
+{
+    octree.resize(gpuOctreeView.numLeafNodes);
+
+    memcpyD2H(gpuOctreeView.prefixes, octree.prefixes.size(), octree.prefixes.data());
+    memcpyD2H(gpuOctreeView.childOffsets, octree.childOffsets.size(), octree.childOffsets.data());
+    memcpyD2H(gpuOctreeView.parents, octree.parents.size(), octree.parents.data());
+    memcpyD2H(gpuOctreeView.internalToLeaf, octree.internalToLeaf.size(), octree.internalToLeaf.data());
+    memcpyD2H(gpuOctreeView.leafToInternal, octree.leafToInternal.size(), octree.leafToInternal.data());
+    std::copy_n(gpuOctreeView.levelRange, octree.levelRange.size(), octree.levelRange);
+}
+
 //! @brief Deprecated, do not use in new code. Not used anymore in production code, some unit test usage remaining.
 template<class KeyType>
 class Octree

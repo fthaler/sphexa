@@ -19,6 +19,7 @@
 #include "cstone/domain/assignment.hpp"
 #include "cstone/domain/layout.hpp"
 #include "cstone/focus/octree_focus_mpi.hpp"
+#include "cstone/halos/halos.hpp"
 #include "cstone/primitives/gather.hpp"
 #include "cstone/primitives/primitives_acc.hpp"
 #include "cstone/sfc/box_mpi.hpp"
@@ -124,6 +125,7 @@ public:
         reallocate(focusTree_.octreeViewAcc().numLeafNodes + 1, allocGrowthRate_, layoutAcc_, layout_);
 
         halos_ = Halos<KeyType, Accelerator>(myRank_, comm_);
+        downloadTreeToHost();
     }
 
     /*! @brief Call on DD steps.
@@ -196,6 +198,8 @@ public:
                                 layoutAcc_.begin() + letLocalRange.start(), LocalIndex(0));
         }
         fill<useGpu>(layoutAcc_.begin() + letLocalRange.end(), layoutAcc_.end(), numParticles);
+
+        if constexpr (useGpu) { memcpyD2H(layoutAcc_.data(). layoutAcc_.size(), layout_.data()); }
     }
 
     /*! @brief Call on DD steps.
@@ -318,6 +322,7 @@ public:
 
     void setGrowthAllocRate(float factor) { allocGrowthRate_ = factor; }
 
+    //! @brief Pointers to GPU data if active, CPU otherwise
     OctreeNsView<T, KeyType> octreeProperties() const
     {
         auto ft = focusTree_.octreeViewAcc();
@@ -333,7 +338,43 @@ public:
                 focusTree_.geoSizesAcc().data()};
     }
 
+    //! @brief Pointers to CPU data
+    OctreeNsView<T, KeyType> octreePropertiesHost() const
+    {
+        if constexpr (useGpu)
+        {
+            auto ft = octreeHost_.octreeViewAcc();
+            return {ft.numLeafNodes,
+                    ft.prefixes,
+                    ft.childOffsets,
+                    ft.parents,
+                    ft.internalToLeaf,
+                    ft.levelRange,
+                    focusTree_.treeLeaves().data(),
+                    layout_.data(),
+                    geoCentersHost_.data(),
+                    geoSizesHost_.data()};
+        }
+        else
+        {
+            return octreeProperties();
+        }
+    }
+
 private:
+
+    void downloadTreeToHost()
+    {
+        if constexpr (useGpu)
+        {
+            downloadFromGpu(octreeHost_, focusTree_.octreeViewAcc());
+            auto numNodes = octreeHost_.numNodes;
+
+            reallocate(numNodes, allocGrowthRate_, geoCentersHost_, geoSizesHost_);
+            memcpyD2H(focusTree_.geoCentersAcc().data(), numNodes, geoCentersHost_.data());
+            memcpyD2H(focusTree_.geoSizesAcc().data(), numNodes, geoSizesHost_.data());
+        }
+    }
 
     //! @brief make sure all array sizes are equal to @p value
     template<class... Arrays>
@@ -475,6 +516,10 @@ private:
      * -Also contains particle counts.
      */
     FocusedOctree<KeyType, T, Accelerator> focusTree_;
+
+    //! @brief CPU copy of structural data in focusTree
+    OctreeData<KeyType, CpuTag> octreeHost_;
+    std::vector<Vec3<T>> geoCentersHost_, geoSizesHost_;
 
     //! @brief particle offsets of each leaf node in focusedTree_, length = focusedTree_.treeLeaves().size()
     AccVector<LocalIndex> layoutAcc_;

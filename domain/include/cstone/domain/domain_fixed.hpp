@@ -98,6 +98,7 @@ public:
 
         globalLeaves_    = computeSpanningTree<KeyType>(domainBoundaries);
         globalLeavesAcc_ = globalLeaves_; // Upload to GPU if active
+        reallocate(nNodes(globalLeaves_), allocGrowthRate_, globalLeafCountsAcc_);
 
         // CPU/GPU linked tree for globalLeaves_
         globalOctreeAcc_.resize(nNodes(globalLeavesAcc_));
@@ -116,6 +117,9 @@ public:
         auto invThetaEff = invThetaMinMac(theta);
         focusTree.convergeToLevel(box, assignment_, globalLeavesAcc_, invThetaEff, maxLevel, scratch);
         focusTree_ = std::move(focusTree);
+
+        // Mark all cells 2-layers out as halos
+        focusTree_.discoverAdjacent(3.01, scratch, false);
     }
 
     /*! @brief Call on DD steps.
@@ -366,6 +370,7 @@ private:
     //! @brief SFC decomposition data
     std::vector<KeyType> globalLeaves_;
     AccVector<KeyType> globalLeavesAcc_;
+    AccVector<unsigned> globalLeafCountsAcc_;
     OctreeData<KeyType, Accelerator> globalOctreeAcc_;
     SfcAssignment<KeyType> assignment_;
 

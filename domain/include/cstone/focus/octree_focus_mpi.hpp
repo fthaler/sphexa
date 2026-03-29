@@ -589,6 +589,48 @@ public:
         reallocate(scratch, origSize, 1.0);
     }
 
+    //! @brief used for uniform tree to e.g. flag all leaves 2 cells away from the subdomain surface
+    template<class Vector>
+    void discoverAdjacent(float searchExtFact,
+                          Vector& scratch,
+                          bool accumulate)
+    {
+        TreeNodeIndex firstNode    = assignment_[myRank_].start();
+        TreeNodeIndex lastNode     = assignment_[myRank_].end();
+        auto let                   = octreeViewAcc();
+        std::size_t numLeafNodes   = let.numLeafNodes;
+
+        if (accumulate && TreeNodeIndex(macsAcc_.size()) != let.numNodes)
+        {
+            throw std::runtime_error("halo flags not correctly allocated\n");
+        }
+        reallocate(let.numNodes, allocGrowthRate_, macsAcc_);
+
+        size_t origSize                   = scratch.size();
+        auto [searchCenters, searchSizes] = util::packAllocBuffer(
+            scratch, util::TypeList<Vec3<RealType>, Vec3<RealType>>{}, {numLeafNodes, numLeafNodes}, 128);
+        gatherAcc<useGpu>(let.leafToInternalSpan(), geoCentersAcc_.data(), searchCenters.data());
+        gatherAcc<useGpu>(let.leafToInternalSpan(), geoSizesAcc_.data(), searchSizes.data());
+        scaleGpuAcc<useGpu>(searchSizes.data(), searchSizes.data() + numLeafNodes, searchSizes.data(),
+                            RealType(searchExtFact));
+        if (not accumulate) { fill<useGpu>(rawPtr(macsAcc_), rawPtr(macsAcc_) + macsAcc_.size(), uint8_t(0)); }
+
+        if constexpr (HaveGpu<Accelerator>{})
+        {
+            findHalosGpu(let.prefixes, let.childOffsets, let.parents, geoCentersAcc_.data(), geoSizesAcc_.data(),
+                         leavesAcc_.data(), searchCenters.data(), searchSizes.data(), box_, firstNode, lastNode,
+                         macsAcc_.data());
+            auto hc = toHost(macsAcc_);
+        }
+        else
+        {
+            findHalos(let.prefixes, let.childOffsets, let.parents, geoCentersAcc_.data(), geoSizesAcc_.data(),
+                      leaves_.data(), searchCenters.data(), searchSizes.data(), box_, firstNode, lastNode,
+                      macsAcc_.data());
+        }
+        reallocate(scratch, origSize, 1.0);
+    }
+
     int computeLayout(std::span<LocalIndex> layoutAcc, std::span<LocalIndex> layout) const
     {
         computeNodeLayout<useGpu>({leafCountsAcc_.data(), leafCountsAcc().size()}, {macsAcc_.data(), macsAcc_.size()},
@@ -649,8 +691,6 @@ public:
             updateGeoCenters();
             MPI_Allreduce(MPI_IN_PLACE, &converged, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
         }
-        reallocate(macsAcc_, octreeAcc_.numNodes, allocGrowthRate_);
-        fill<useGpu>(macsAcc_.begin(), macsAcc_.end(), 0);
     }
 
     /*! @brief exchange data of non-peer (beyond focus) tree cells

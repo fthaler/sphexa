@@ -136,17 +136,18 @@ public:
      *              - LET local particle indexing, i.e. tree cell offsets and particle counts
      *        Does not do: - communication
      */
-    template<class KeyVec, class VectorX, class VectorI, class... Vectors>
+    template<class KeyVec, class VectorX, class VectorI, class VectorJ, class... Vectors>
     void sync(KeyVec& keys,
               VectorX& x,
               VectorX& y,
               VectorX& z,
               VectorX& q,
-              VectorI& sfcOrder,
+              VectorI& gidx,
+              VectorJ& sfcOrder,
               std::tuple<Vectors&...> scratchBuffers)
     {
         staticChecks<KeyVec, VectorX, Vectors...>(scratchBuffers);
-        checkSizesEqual(x.size(), keys, x, y, z, q);
+        checkSizesEqual(x.size(), keys, x, y, z, q, gidx);
         LocalIndex numParticles = x.size();
         bufDesc_ = {0, numParticles, numParticles};
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratchBuffers);
@@ -178,7 +179,7 @@ public:
         }
 
         // reorder particles to SFC order
-        gatherArrays({sfcOrder.data(), nParticles()}, 0, std::tie(x, y, z, q), scratchBuffers);
+        gatherArrays({sfcOrder.data(), nParticles()}, 0, std::tie(x, y, z, q, gidx), scratchBuffers);
 
         // compute local node particle counts and node particle layout
         focusTree_.computeLocalCounts(keyView);
@@ -199,7 +200,7 @@ public:
         }
         fill<useGpu>(layoutAcc_.begin() + letLocalRange.end(), layoutAcc_.end(), numParticles);
 
-        if constexpr (useGpu) { memcpyD2H(layoutAcc_.data(). layoutAcc_.size(), layout_.data()); }
+        if constexpr (useGpu) { memcpyD2H(layoutAcc_.data(), layoutAcc_.size(), layout_.data()); }
     }
 
     /*! @brief Call on DD steps.
@@ -210,17 +211,18 @@ public:
      *        Does: - Particle SFC sort
      *              - LET local particle indexing, i.e. tree cell offsets and particle counts
      */
-    template<class KeyVec, class VectorX, class VectorI, class... Vectors>
+    template<class KeyVec, class VectorX, class VectorI, class VectorJ, class... Vectors>
     void syncWithHalos(KeyVec& keys,
                        VectorX& x,
                        VectorX& y,
                        VectorX& z,
                        VectorX& q,
-                       VectorI& sfcOrder,
+                       VectorI& gidx,
+                       VectorJ& sfcOrder,
                        std::tuple<Vectors&...> scratch)
     {
         staticChecks<KeyVec, VectorX, Vectors...>(scratch);
-        checkSizesEqual(x.size(), keys, x, y, z, q);
+        checkSizesEqual(x.size(), keys, x, y, z, q, gidx);
         LocalIndex numParticles = x.size();
         bufDesc_                = {0, numParticles, numParticles};
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratch);
@@ -277,10 +279,10 @@ public:
         bufDesc_ = {layout_[myRange.start()], layout_[myRange.end()], layout_.back()};
 
         // We now know which cells have how many halos. Make space for them
-        lowMemReallocate(bufDesc_.size, allocGrowthRate_, std::tie(x, y, z, q), scratch);
+        lowMemReallocate(bufDesc_.size, allocGrowthRate_, std::tie(x, y, z, q, gidx), scratch);
 
         // reorder particles to SFC order and place them behind halos with lower SFC keys
-        gatherArrays({sfcOrder.data(), nParticles()}, bufDesc_.start, std::tie(x, y, z, q), scratch);
+        gatherArrays({sfcOrder.data(), nParticles()}, bufDesc_.start, std::tie(x, y, z, q, gidx), scratch);
 
         halos_.exchangeRequests(focusTree_.treeLeaves(), focusTree_.assignment(), layout_);
     }
@@ -368,7 +370,7 @@ private:
     {
         if constexpr (useGpu)
         {
-            downloadFromGpu(octreeHost_, focusTree_.octreeViewAcc());
+            downloadOctreeFromGpu(octreeHost_, focusTree_.octreeViewAcc());
             auto numNodes = octreeHost_.numNodes;
 
             reallocate(numNodes, allocGrowthRate_, geoCentersHost_, geoSizesHost_);

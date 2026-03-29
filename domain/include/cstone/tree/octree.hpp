@@ -382,7 +382,7 @@ void downloadOctreeFromGpu(OctreeData<KeyType, CpuTag>& octree, OctreeView<const
     memcpyD2H(gpuOctreeView.parents, octree.parents.size(), octree.parents.data());
     memcpyD2H(gpuOctreeView.internalToLeaf, octree.internalToLeaf.size(), octree.internalToLeaf.data());
     memcpyD2H(gpuOctreeView.leafToInternal, octree.leafToInternal.size(), octree.leafToInternal.data());
-    std::copy_n(gpuOctreeView.levelRange, octree.levelRange.size(), octree.levelRange);
+    std::copy_n(gpuOctreeView.levelRange, octree.levelRange.size(), octree.levelRange.data());
 }
 
 //! @brief Deprecated, do not use in new code. Not used anymore in production code, some unit test usage remaining.

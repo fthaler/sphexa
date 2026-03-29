@@ -419,14 +419,15 @@ TEST(DomainGpu, fixedBoundaries)
     DomainFixed<KeyType, Real, GpuTag> domain;
     domain.setBoundaries(boundaryRankStart, box, maxLevel, theta, comm, s1);
 
-    DeviceVector<Real> d_x          = x;
-    DeviceVector<Real> d_y          = y;
-    DeviceVector<Real> d_z          = z;
-    DeviceVector<Real> d_q          = q;
+    DeviceVector<Real> d_x = x;
+    DeviceVector<Real> d_y = y;
+    DeviceVector<Real> d_z = z;
+    DeviceVector<Real> d_q = q;
+    DeviceVector<int> d_gidx(x.size());
     DeviceVector<KeyType> d_keys(x.size());
     DeviceVector<LocalIndex> sfcOrder;
 
-    domain.sync(d_keys, d_x, d_y, d_z, d_q, sfcOrder, std::tie(s1, s2));
+    domain.syncWithHalos(d_keys, d_x, d_y, d_z, d_q, d_gidx, sfcOrder, std::tie(s1, s2));
 
     auto ftree     = domain.focusTree();
     auto ftreeView = ftree.octreeViewAcc();

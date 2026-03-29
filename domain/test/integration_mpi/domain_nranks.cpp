@@ -541,6 +541,7 @@ void testFixedBoundaries(bool withHalos)
     std::vector<Real> y(coords.y().begin() + firstAssignedIndex, coords.y().begin() + lastAssignedIndex);
     std::vector<Real> z(coords.z().begin() + firstAssignedIndex, coords.z().begin() + lastAssignedIndex);
     std::vector<Real> q(x.size(), 1.0 / x.size());
+    std::vector<int> gidx(x.size());
 
     auto shuffle = [](auto& x, auto& y, auto& z, auto& q)
     {
@@ -563,10 +564,10 @@ void testFixedBoundaries(bool withHalos)
     std::vector<LocalIndex> sfcOrder;
     if (withHalos)
     {
-        domain.syncWithHalos(keys, x, y, z, q, sfcOrder, std::tie(s1, s2));
+        domain.syncWithHalos(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2));
         domain.exchangeHalos(std::tie(x, y, z, q), s1, s2);
     }
-    else { domain.sync(keys, x, y, z, q, sfcOrder, std::tie(s1, s2)); }
+    else { domain.sync(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2)); }
 
     std::vector<KeyType> testKeys(x.size());
     computeSfcKeys(x.data(), y.data(), z.data(), sfcKindPointer(testKeys.data()), x.size(), box);

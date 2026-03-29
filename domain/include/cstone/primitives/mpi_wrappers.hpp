@@ -156,6 +156,25 @@ auto mpiAllreduce(const Ts* src, Td* dest, int count, MPI_Op op, MPI_Comm comm)
 }
 
 template<class Ts, class Td, std::enable_if_t<std::is_arithmetic_v<Td>, int> = 0>
+auto mpiAllgather(const Ts* src, Td* dest, int count, MPI_Comm comm)
+{
+    return MPI_Allgather(src, count, MpiType<Td>{}, dest, count, MpiType<Td>{}, comm);
+}
+
+template<class Ts, class Td, std::enable_if_t<!std::is_arithmetic_v<Td>, int> = 0>
+auto mpiAllgather(const Ts* src, Td* dest, int count, MPI_Comm comm)
+{
+    using ValueType    = typename Td::value_type;
+    constexpr size_t N = Td{}.size();
+
+    using SrcType = std::conditional_t<std::is_same_v<void, Ts>, void, ValueType>;
+    auto src_ptr  = reinterpret_cast<const SrcType*>(src);
+    auto dest_ptr = reinterpret_cast<ValueType*>(dest);
+
+    return mpiAllgather(src_ptr, count * N, dest_ptr, comm);
+}
+
+template<class Ts, class Td, std::enable_if_t<std::is_arithmetic_v<Td>, int> = 0>
 auto mpiAllgatherv(const Ts* src, int sendCount, Td* dest, const int* counts, const int* displ, MPI_Comm comm)
 {
     return MPI_Allgatherv(src, sendCount, MpiType<Td>{}, dest, counts, displ, MpiType<Td>{}, comm);

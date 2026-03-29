@@ -110,6 +110,23 @@ auto mpiAllreduceGpuDirect(const T* src, T* dest, size_t count, MPI_Op op, MPI_C
     else { mpiAllreduce(src, dest, count, op, comm); }
 }
 
+template<bool useGpu, class T>
+auto mpiAllgatherGpuDirect(const T* src, T* dest, size_t count, MPI_Comm comm)
+{
+    if constexpr (useGpu && !useGpuDirect)
+    {
+        int rank, numRanks;
+        MPI_Comm_rank(comm, &rank);
+        MPI_Comm_size(comm, &numRanks);
+
+        std::vector<T> srcBuf(count), destBuf(count * numRanks);
+        memcpyD2H(src, count, srcBuf.data());
+        mpiAllgather(srcBuf.data(), destBuf.data(), count, comm);
+        memcpyH2D(destBuf.data(), count * numRanks, dest);
+    }
+    else { mpiAllgather(src, dest, count, comm); }
+}
+
 //! @brief adaptor to wrap compile-time size arrays into flattened arrays of the underlying type
 template<bool useGpu, class Ts, class Td>
 auto mpiAllgathervGpuDirect(const Ts* src, int sendCount, Td* dest, const int* counts, const int* displ, MPI_Comm comm)

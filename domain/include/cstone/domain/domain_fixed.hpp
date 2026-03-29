@@ -48,6 +48,7 @@ public:
     //! @brief construct empty Domain
     DomainFixed()
         : focusTree_(0, 0, 0, MPI_COMM_NULL)
+        , halos_(0, MPI_COMM_NULL)
     {
     }
 
@@ -120,6 +121,9 @@ public:
 
         // Mark all cells 2-layers out as halos
         focusTree_.discoverAdjacent(3.01, scratch, false);
+        reallocate(focusTree_.octreeViewAcc().numLeafNodes + 1, allocGrowthRate_, layoutAcc_, layout_);
+
+        halos_ = Halos<KeyType, Accelerator>(myRank_, comm_);
     }
 
     /*! @brief Call on DD steps.
@@ -177,7 +181,6 @@ public:
         // compute local node particle counts and node particle layout
         focusTree_.computeLocalCounts(keyView);
 
-        reallocate(focusTree_.octreeViewAcc().numLeafNodes + 1, allocGrowthRate_, layoutAcc_);
         fill<useGpu>(layoutAcc_.begin(), layoutAcc_.end(), 0);
         auto leafCounts    = focusTree_.leafCountsAcc();
         auto letLocalRange = focusTree_.assignment()[myRank_];
@@ -193,6 +196,96 @@ public:
                                 layoutAcc_.begin() + letLocalRange.start(), LocalIndex(0));
         }
         fill<useGpu>(layoutAcc_.begin() + letLocalRange.end(), layoutAcc_.end(), numParticles);
+    }
+
+    /*! @brief Call on DD steps.
+     *
+     *        Preconditions: - keys,x,y,z,q must have equal size. sfcOrder will be resized
+     *                       - setBoundaries() has been called
+     *                       - x,y,z coordinates are within local domain, starting at index 0
+     *        Does: - Particle SFC sort
+     *              - LET local particle indexing, i.e. tree cell offsets and particle counts
+     */
+    template<class KeyVec, class VectorX, class VectorI, class... Vectors>
+    void syncWithHalos(KeyVec& keys,
+                       VectorX& x,
+                       VectorX& y,
+                       VectorX& z,
+                       VectorX& q,
+                       VectorI& sfcOrder,
+                       std::tuple<Vectors&...> scratch)
+    {
+        staticChecks<KeyVec, VectorX, Vectors...>(scratch);
+        checkSizesEqual(x.size(), keys, x, y, z, q);
+        LocalIndex numParticles = x.size();
+        bufDesc_                = {0, numParticles, numParticles};
+        lowMemReallocate(numParticles, allocGrowthRate_, {}, scratch);
+
+        // Compute and sort SFC keys
+        computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
+        sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
+        std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
+        sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratch),
+                          get<1>(scratch), allocGrowthRate_);
+
+        // assert particles are in local subdomain
+        {
+            KeyType minKey, maxKey;
+            if constexpr (useGpu)
+            {
+                memcpyD2H(keyView.data(), 1, &minKey);
+                memcpyD2H(keyView.data() + keyView.size() - 1, 1, &maxKey);
+            }
+            else
+            {
+                minKey = keyView.front();
+                maxKey = keyView.back();
+            }
+            if (minKey < assignment_[myRank_] || maxKey >= assignment_[myRank_ + 1])
+            {
+                throw std::runtime_error("keys not in local subdomain\n");
+            }
+        }
+
+        // compute node counts of the global tree
+        if constexpr (useGpu)
+        {
+            computeNodeCountsGpu(globalLeavesAcc_.data(), globalLeafCountsAcc_.data(), nNodes(globalLeavesAcc_),
+                                 {keyView.data(), keyView.size()}, std::numeric_limits<unsigned>::max(), false);
+        }
+        else
+        {
+            computeNodeCounts(globalLeavesAcc_.data(), globalLeafCountsAcc_.data(), nNodes(globalLeavesAcc_),
+                              {keyView.data(), keyView.size()}, std::numeric_limits<unsigned>::max(), false);
+        }
+        // assumes all ranks have the same number of global nodes (otherwise would have to use allgatherv)
+        mpiAllgatherGpuDirect<useGpu>((unsigned*)MPI_IN_PLACE, globalLeafCountsAcc_.data(),
+                                      assignment_.numNodesPerRank()[myRank_], comm_);
+
+        // compute LET counts
+        focusTree_.updateCounts(keyView, {globalLeavesAcc_.data(), globalLeavesAcc_.size()},
+                                {globalLeafCountsAcc_.data(), globalLeafCountsAcc_.size()}, std::get<0>(scratch));
+
+        focusTree_.computeLayout({rawPtr(layoutAcc_), layoutAcc_.size()}, layout_);
+
+        auto myRange = focusTree_.assignment()[myRank_];
+        bufDesc_ = {layout_[myRange.start()], layout_[myRange.end()], layout_.back()};
+
+        // We now know which cells have how many halos. Make space for them
+        lowMemReallocate(bufDesc_.size, allocGrowthRate_, std::tie(x, y, z, q), scratch);
+
+        // reorder particles to SFC order and place them behind halos with lower SFC keys
+        gatherArrays({sfcOrder.data(), nParticles()}, bufDesc_.start, std::tie(x, y, z, q), scratch);
+
+        halos_.exchangeRequests(focusTree_.treeLeaves(), focusTree_.assignment(), layout_);
+    }
+
+    //! @brief repeat the halo exchange pattern from the previous sync operation for a different set of arrays
+    template<class... Vectors, class SendBuffer, class ReceiveBuffer>
+    void exchangeHalos(std::tuple<Vectors&...> arrays, SendBuffer& sendBuffer, ReceiveBuffer& receiveBuffer) const
+    {
+        std::apply([this](auto&... arrays) { this->checkSizesEqual(this->bufDesc_.size, arrays...); }, arrays);
+        this->halos_.exchangeHalos(arrays, sendBuffer, receiveBuffer);
     }
 
     //! @brief return the index of the first particle that's part of the local assignment
@@ -386,6 +479,9 @@ private:
     //! @brief particle offsets of each leaf node in focusedTree_, length = focusedTree_.treeLeaves().size()
     AccVector<LocalIndex> layoutAcc_;
     std::vector<LocalIndex> layout_;
+
+    //! @brief stores particle offsets to perform halo exchanges
+    Halos<KeyType, Accelerator> halos_;
 };
 
 } // namespace cstone

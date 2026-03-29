@@ -495,7 +495,7 @@ TEST(FocusDomain, randomGaussianGrav)
     randomGaussianGrav<uint64_t, double>(rank, nRanks);
 }
 
-TEST(FocusDomain, fixedBoundaries)
+void testFixedBoundaries(bool withHalos)
 {
     int rank = 0, numRanks = 0;
 
@@ -542,6 +542,18 @@ TEST(FocusDomain, fixedBoundaries)
     std::vector<Real> z(coords.z().begin() + firstAssignedIndex, coords.z().begin() + lastAssignedIndex);
     std::vector<Real> q(x.size(), 1.0 / x.size());
 
+    auto shuffle = [](auto& x, auto& y, auto& z, auto& q)
+    {
+        std::vector<LocalIndex> permutation(x.size());
+        std::iota(begin(permutation), end(permutation), LocalIndex(0));
+        std::mt19937 gen(0);
+        std::ranges::shuffle(permutation, gen);
+
+        auto temp = x;
+        gatherArrays(permutation, 0, std::tie(x, y, z, q), std::tie(temp));
+    };
+    shuffle(x, y, z, q);
+
     std::vector<Real> s1, s2;
 
     DomainFixed<KeyType, Real> domain;
@@ -549,7 +561,27 @@ TEST(FocusDomain, fixedBoundaries)
 
     std::vector<KeyType> keys(x.size());
     std::vector<LocalIndex> sfcOrder;
-    domain.sync(keys, x, y, z, q, sfcOrder, std::tie(s1, s2));
+    if (withHalos)
+    {
+        domain.syncWithHalos(keys, x, y, z, q, sfcOrder, std::tie(s1, s2));
+        domain.exchangeHalos(std::tie(x, y, z, q), s1, s2);
+    }
+    else { domain.sync(keys, x, y, z, q, sfcOrder, std::tie(s1, s2)); }
+
+    std::vector<KeyType> testKeys(x.size());
+    computeSfcKeys(x.data(), y.data(), z.data(), sfcKindPointer(testKeys.data()), x.size(), box);
+
+    auto o = domain.octreePropertiesHost();
+    for (int i = 0; i < o.numLeafNodes; ++i)
+    {
+        int iidx = domain.focusTree().octreeViewAcc().leafToInternalSpan()[i];
+        for (int p = o.layout[i]; p < o.layout[i + 1]; ++p)
+        {
+            EXPECT_EQ(norm2(minDistance({x[p], y[p], z[p]}, o.centers[iidx], o.sizes[iidx])), 0.0);
+            EXPECT_GE(testKeys[p], o.leaves[i]);
+            EXPECT_LT(testKeys[p], o.leaves[i + 1]);
+        }
+    }
 
     auto ftree     = domain.focusTree();
     auto ftreeView = ftree.octreeViewAcc();
@@ -570,3 +602,7 @@ TEST(FocusDomain, fixedBoundaries)
     EXPECT_EQ(numParticles, counts[0]);
     EXPECT_TRUE(std::is_sorted(keys.begin(), keys.end()));
 }
+
+TEST(FocusDomain, fixedBoundaries) { testFixedBoundaries(false); }
+
+TEST(FocusDomain, fixedBoundariesWithHalos) { testFixedBoundaries(true); }

@@ -271,6 +271,7 @@ public:
                                 {globalLeafCountsAcc_.data(), globalLeafCountsAcc_.size()}, std::get<0>(scratch));
 
         focusTree_.computeLayout({rawPtr(layoutAcc_), layoutAcc_.size()}, layout_);
+        if constexpr (not useGpu) { layoutAcc_ = layout_; }
 
         auto myRange = focusTree_.assignment()[myRank_];
         bufDesc_ = {layout_[myRange.start()], layout_[myRange.end()], layout_.back()};

@@ -37,7 +37,7 @@ std::vector<cstone::Vec3<T>> getSurfacePoints(unsigned p, T r = 1, cstone::Vec3<
                     if (i == 0 || i == p - 1 || j == 0 || j == p - 1 || k == 0 || k == p - 1)
                     {
                         points.push_back(
-                            {-1.0 + i * 2.0 / (p - 1), -1.0 + j * 2.0 / (p - 1), -1.0 + k * 2.0 / (p - 1)});
+                            {T(-1.0 + i * 2.0 / (p - 1)), T(-1.0 + j * 2.0 / (p - 1)), T(-1.0 + k * 2.0 / (p - 1))});
                     }
                 }
             }
@@ -54,7 +54,7 @@ std::vector<cstone::Vec3<T>> getSurfacePoints(unsigned p, T r = 1, cstone::Vec3<
                     if (i == 0 || i == p - 1 || j == 0 || j == p - 1 || k == 0 || k == p - 1)
                     {
                         points.push_back(
-                            {-1.0 + i * 2.0 / (p - 1), -1.0 + j * 2.0 / (p - 1), -1.0 + k * 2.0 / (p - 1)});
+                            {T(-1.0 + i * 2.0 / (p - 1)), T(-1.0 + j * 2.0 / (p - 1)), T(-1.0 + k * 2.0 / (p - 1))});
                     }
                 }
             }

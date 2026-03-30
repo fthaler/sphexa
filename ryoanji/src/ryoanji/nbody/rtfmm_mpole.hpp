@@ -33,8 +33,8 @@ template<class Tc, class T, unsigned S>
 struct GlobalData
 {
     Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
-    T UT[S * S];
-    T vSinv[S * S];
+    T  UT[S * S];
+    T  vSinv[S * S];
     T  vSinvUT[S * S];
     T  m2m[8][S * S];
     T  r0;
@@ -302,7 +302,9 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
         else
             return cublasSgemm(std::forward<Args>(args)...);
     };
-    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinvUT, S, qEquivAllDevice, S,
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->UT, S, qEquivAllDevice, S, &beta,
+                     qEquivAllDevice, S));
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, qEquivAllDevice, S,
                      &beta, qEquivAllDevice, S));
 
     cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),

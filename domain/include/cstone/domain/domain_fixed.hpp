@@ -117,10 +117,12 @@ public:
         FocusedOctree<KeyType, T, Accelerator> focusTree(myRank_, numRanks_, bucketSizeFocus, comm_);
 
         auto invThetaEff = invThetaMinMac(theta);
-        focusTree.convergeToLevel(box, assignment_, globalLeavesAcc_, invThetaEff, maxLevel, scratch);
+        focusTree.convergeToLevel(box, assignment_, globalOctreeAcc_.cdata(), globalLeavesAcc_, invThetaEff, maxLevel,
+                                  scratch);
         focusTree_ = std::move(focusTree);
 
-        // Mark all cells 2-layers out as halos
+        // Mark all cells 2-layers out as halos, set leaf search sizes to a little over 3x the box half diameter
+        // to reach just beyond the nearest neighbor
         focusTree_.discoverAdjacent(3.01, scratch, false);
         reallocate(focusTree_.octreeViewAcc().numLeafNodes + 1, allocGrowthRate_, layoutAcc_, layout_);
 

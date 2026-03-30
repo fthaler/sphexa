@@ -170,12 +170,11 @@ void maxLevelRefinement(int thisRank, int numRanks)
 
     FocusedOctree<KeyType, T> focusTree(thisRank, numRanks, bucketSizeLocal, MPI_COMM_WORLD);
     std::vector<int, util::DefaultInitAdaptor<int>> scratch;
-    focusTree.convergeToLevel(box, assignment, globalLeaves, invThetaEff, maxLevel, scratch);
+    focusTree.convergeToLevel(box, assignment, domainTree.cdata(), globalLeaves, invThetaEff, maxLevel, scratch);
 
     TreeNodeIndex globalNumLeafNodes = 1 << (3 * maxLevel);
     EXPECT_GE(focusTree.octreeViewAcc().numLeafNodes, globalNumLeafNodes / numRanks);
     EXPECT_LE(focusTree.octreeViewAcc().numLeafNodes, globalNumLeafNodes);
-    std::cout << thisRank << ": " << focusTree.octreeViewAcc().numLeafNodes << " " << focusTree.assignment()[thisRank].count() << std::endl;
 }
 
 TEST(OctreeFocusLET, uniformMaxLevel)

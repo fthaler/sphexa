@@ -665,6 +665,7 @@ public:
     template<class DeviceVector = std::vector<KeyType>>
     void convergeToLevel(const Box<RealType>& box,
                          const SfcAssignment<KeyType>& assignment,
+                         OctreeView<const KeyType> gOctree,
                          std::span<const KeyType> globalTreeLeaves,
                          float invThetaEff,
                          int maxLevel,
@@ -690,6 +691,19 @@ public:
             rebalanceStatus_ |= countsCriterion;
             updateGeoCenters();
             MPI_Allreduce(MPI_IN_PLACE, &converged, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        }
+
+        reallocate(globalGeoCentersAcc_, gOctree.numNodes, allocGrowthRate_);
+        reallocate(globalGeoSizesAcc_, gOctree.numNodes, allocGrowthRate_); // needed by API but can be discarded
+        if constexpr (HaveGpu<Accelerator>{})
+        {
+            computeGeoCentersGpu(gOctree.prefixes, gOctree.numNodes, rawPtr(globalGeoCentersAcc_),
+                                 rawPtr(globalGeoSizesAcc_), box_);
+        }
+        else
+        {
+            nodeFpCenters<KeyType>({gOctree.prefixes, size_t(gOctree.numNodes)}, globalGeoCentersAcc_.data(),
+                                   globalGeoSizesAcc_.data(), box_);
         }
     }
 

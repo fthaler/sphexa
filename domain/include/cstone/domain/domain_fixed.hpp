@@ -346,7 +346,7 @@ public:
     {
         if constexpr (useGpu)
         {
-            auto ft = octreeHost_.octreeViewAcc();
+            auto ft = octreeHost_.data();
             return {ft.numLeafNodes,
                     ft.prefixes,
                     ft.childOffsets,

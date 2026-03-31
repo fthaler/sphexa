@@ -168,6 +168,7 @@ void upsweepMultipoles(TreeNodeIndex firstCell, TreeNodeIndex lastCell, const Tr
 
 INSTANTIATE_MULTIPOLE(CartesianQuadrupole)
 INSTANTIATE_MULTIPOLE(CartesianMDQpole)
+INSTANTIATE_MULTIPOLEA(RtfmmMultipole, rtfmmSurfacePoints(4))
 INSTANTIATE_MULTIPOLEA(RtfmmMultipole, rtfmmSurfacePoints(5))
 
 } // namespace ryoanji

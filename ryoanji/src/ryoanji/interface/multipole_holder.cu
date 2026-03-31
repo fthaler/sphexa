@@ -234,6 +234,7 @@ const MType* MultipoleHolder<Tc, Th, Tm, Ta, Tf, KeyType, MType>::deviceMultipol
 
 MHOLDER(CartesianQuadrupole)
 MHOLDER(CartesianMDQpole)
+MHOLDERA(RtfmmMultipole, rtfmmSurfacePoints(4))
 MHOLDERA(RtfmmMultipole, rtfmmSurfacePoints(5))
 
 #define DIRECT_SUM(T)                                                                                                  \

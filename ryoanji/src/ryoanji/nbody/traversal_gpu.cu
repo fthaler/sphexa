@@ -598,6 +598,7 @@ double traverse(cstone::GroupView grp, const int initNodeIdx, const Tc* __restri
 
 TRAVERSE_MPOLE(CartesianQuadrupole)
 TRAVERSE_MPOLE(CartesianMDQpole)
+TRAVERSE_MPOLEA(RtfmmMultipole, rtfmmSurfacePoints(4))
 TRAVERSE_MPOLEA(RtfmmMultipole, rtfmmSurfacePoints(5))
 
 int bhMaxTargetSize() { return TravConfig::targetSize; }

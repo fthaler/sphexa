@@ -281,6 +281,8 @@ void rtfmmInit(Tc r0)
 #endif
 }
 
+template void rtfmmInit<double, double, 4>(double);
+template void rtfmmInit<float, float, 4>(float);
 template void rtfmmInit<double, double, 5>(double);
 template void rtfmmInit<float, float, 5>(float);
 

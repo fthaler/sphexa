@@ -272,16 +272,13 @@ inline void checkCublas(cublasStatus_t status)
     if (status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error("CUBLAS error");
 }
 
-template<unsigned S, class T1, class T2, class KeyType>
+template<unsigned S, class T1, class T2, class KeyType, class Vector>
 void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNodeIndex* leafToInternal,
               const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
-              RtfmmMultipole<T2, S>* multipoles)
+              RtfmmMultipole<T2, S>* multipoles, cublasHandle_t handle, Vector& scratchBuffer)
 {
-    // TODO: move to outside
-    cublasHandle_t handle;
-    checkCublas(cublasCreate(&handle));
-    T2* qEquivAllDevice;
-    checkGpuErrors(cudaMalloc(&qEquivAllDevice, S * numLeaves * sizeof(T2)));
+    reallocateBytes(scratchBuffer, S * numLeaves * sizeof(T2), 1.1);
+    T2* qEquivAllDevice = reinterpret_cast<T2*>(scratchBuffer.data());
 
     const int blockNum  = numLeaves;
     const int blockSize = std::min(S, 1024u);
@@ -309,9 +306,6 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
 
     cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),
                        multipoles);
-
-    checkGpuErrors(cudaFree(qEquivAllDevice));
-    checkCublas(cublasDestroy(handle));
 }
 
 template<unsigned S, class T1, class T2>
@@ -367,21 +361,23 @@ __global__ void rtfmmM2mReduction(TreeNodeIndex firstParent, TreeNodeIndex lastP
     }
 }
 
-template<unsigned S, class T1, class T2>
+template<unsigned S, class T1, class T2, class... Vectors>
 void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* childOffsets,
-              const TreeNodeIndex numNodes, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
+              const TreeNodeIndex numNodes, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles,
+              cublasHandle_t handle, std::tuple<Vectors&...> scratchBuffers)
 {
-    // TODO: move to outside
-    cublasHandle_t handle;
-    checkCublas(cublasCreate(&handle));
+    constexpr double growthRate = 1.1;
+    static_assert(sizeof...(Vectors) >= 4);
 
-    T2 **m2mPtrs, **multipolePtrs, **tmpPtrs;
-    checkGpuErrors(cudaMalloc(&m2mPtrs, numNodes * sizeof(T2*)));
-    checkGpuErrors(cudaMalloc(&multipolePtrs, numNodes * sizeof(T2*)));
-    checkGpuErrors(cudaMalloc(&tmpPtrs, numNodes * sizeof(T2*)));
+    reallocateBytes(std::get<0>(scratchBuffers), numNodes * sizeof(T2*), growthRate);
+    reallocateBytes(std::get<1>(scratchBuffers), numNodes * sizeof(T2*), growthRate);
+    reallocateBytes(std::get<2>(scratchBuffers), numNodes * sizeof(T2*), growthRate);
+    T2** m2mPtrs       = reinterpret_cast<T2**>(std::get<0>(scratchBuffers).data());
+    T2** multipolePtrs = reinterpret_cast<T2**>(std::get<1>(scratchBuffers).data());
+    T2** tmpPtrs       = reinterpret_cast<T2**>(std::get<2>(scratchBuffers).data());
 
-    RtfmmMultipole<T2, S>* tmp;
-    checkGpuErrors(cudaMalloc(&tmp, numNodes * sizeof(RtfmmMultipole<T2, S>)));
+    reallocateBytes(std::get<3>(scratchBuffers), numNodes * sizeof(RtfmmMultipole<T2, S>), growthRate);
+    RtfmmMultipole<T2, S>* tmp = reinterpret_cast<RtfmmMultipole<T2, S>*>(std::get<3>(scratchBuffers).data());
 
     {
         constexpr int blockSize = 256;
@@ -422,12 +418,6 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
             }
         }
     }
-
-    checkGpuErrors(cudaFree(m2mPtrs));
-    checkGpuErrors(cudaFree(multipolePtrs));
-    checkGpuErrors(cudaFree(tmpPtrs));
-    checkGpuErrors(cudaFree(tmp));
-    checkCublas(cublasDestroy(handle));
 }
 #endif
 

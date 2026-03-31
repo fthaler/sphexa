@@ -300,11 +300,14 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
         else
             return cublasSgemm(std::forward<Args>(args)...);
     };
+    auto* mp_t2 = reinterpret_cast<T2*>(multipoles);
     checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->UT, S, qEquivAllDevice, S, &beta,
-                     qEquivAllDevice, S));
-    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, qEquivAllDevice, S,
+                     mp_t2, S));
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, mp_t2, S,
                      &beta, qEquivAllDevice, S));
 
+    size_t numNodes = numLeaves + (numLeaves - 1) / 7;
+    checkGpuErrors(cudaMemset(multipoles, 0, S * numNodes * sizeof(T2)));
     cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),
                        multipoles);
 }

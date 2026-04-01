@@ -171,7 +171,7 @@ auto mpiAllgather(const Ts* src, Td* dest, int count, MPI_Comm comm)
     auto src_ptr  = reinterpret_cast<const SrcType*>(src);
     auto dest_ptr = reinterpret_cast<ValueType*>(dest);
 
-    return mpiAllgather(src_ptr, count * N, dest_ptr, comm);
+    return mpiAllgather(src_ptr, dest_ptr, count * N, comm);
 }
 
 template<class Ts, class Td, std::enable_if_t<std::is_arithmetic_v<Td>, int> = 0>

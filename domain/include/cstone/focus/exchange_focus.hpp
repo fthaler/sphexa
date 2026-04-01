@@ -315,7 +315,7 @@ void exchangeTreeletGeneral(std::span<const int> interiorPeers,
                             DevVec& scratch,
                             MPI_Comm comm)
 {
-    constexpr int alignmentBytes = 64;
+    constexpr int alignmentBytes = 2 << 20;
     constexpr bool useGpu        = IsDeviceVector<DevVec>{};
 
     std::vector<std::size_t> treeletSizes(interiorPeers.size() + exteriorPeers.size());

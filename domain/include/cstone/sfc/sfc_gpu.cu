@@ -60,4 +60,29 @@ computeSfcKeysGpu(const float*, const float*, const float*, HilbertKey<uint64_t>
 template void
 computeSfcKeysGpu(const double*, const double*, const double*, HilbertKey<uint64_t>*, size_t, const Box<double>&);
 
+template<class KeyType>
+__global__ void
+clampKeysKernel(KeyType* keys, size_t numKeys, KeyType kmin, KeyType kmax)
+{
+    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < numKeys)
+    {
+        auto ki = keys[tid];
+        keys[tid] = stl::min(stl::max(ki, kmin), kmax);
+    }
+}
+
+template<class KeyType>
+void clampKeysGpu(KeyType* keys, std::size_t n, KeyType kmin, KeyType kmax)
+{
+    if (n == 0) { return; }
+
+    constexpr int threadsPerBlock = 256;
+    clampKeysKernel<<<iceil(n, threadsPerBlock), threadsPerBlock>>>(keys, n, kmin, kmax);
+    checkGpuErrors(cudaGetLastError());
+}
+
+template void clampKeysGpu(uint32_t*, std::size_t, uint32_t, uint32_t);
+template void clampKeysGpu(uint64_t*, std::size_t, uint64_t, uint64_t);
+
 } // namespace cstone

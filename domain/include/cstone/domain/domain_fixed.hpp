@@ -156,12 +156,14 @@ public:
 
         // Compute and sort SFC keys
         computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
+        if (!firstSync) { clampKeys<useGpu>(keys.data(), keys.size(), assignment_[myRank_], assignment_[myRank_ + 1]); }
         sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
         std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
         sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratchBuffers),
                           get<1>(scratchBuffers), allocGrowthRate_);
 
         // assert particles are in local subdomain
+        if (!firstSync)
         {
             KeyType minKey, maxKey;
             if constexpr (useGpu)
@@ -203,6 +205,8 @@ public:
         fill<useGpu>(layoutAcc_.begin() + letLocalRange.end(), layoutAcc_.end(), numParticles);
 
         if constexpr (useGpu) { memcpyD2H(layoutAcc_.data(), layoutAcc_.size(), layout_.data()); }
+
+        firstSync = false;
     }
 
     /*! @brief Call on DD steps.
@@ -231,12 +235,14 @@ public:
 
         // Compute and sort SFC keys
         computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
+        if (!firstSync) { clampKeys<useGpu>(keys.data(), keys.size(), assignment_[myRank_], assignment_[myRank_ + 1]); }
         sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
         std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
         sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratch),
                           get<1>(scratch), allocGrowthRate_);
 
         // assert particles are in local subdomain
+        if (!firstSync)
         {
             KeyType minKey, maxKey;
             if constexpr (useGpu)
@@ -287,6 +293,8 @@ public:
         gatherArrays({sfcOrder.data(), nParticles()}, bufDesc_.start, std::tie(x, y, z, q, gidx), scratch);
 
         halos_.exchangeRequests(focusTree_.treeLeaves(), focusTree_.assignment(), layout_);
+
+        firstSync = false;
     }
 
     //! @brief repeat the halo exchange pattern from the previous sync operation for a different set of arrays
@@ -532,6 +540,8 @@ private:
 
     //! @brief stores particle offsets to perform halo exchanges
     Halos<KeyType, Accelerator> halos_;
+
+    bool firstSync{true};
 };
 
 } // namespace cstone

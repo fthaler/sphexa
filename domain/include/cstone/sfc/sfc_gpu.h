@@ -30,4 +30,14 @@ void computeSfcKeys(const T* x, const T* y, const T* z, KeyType* keys, size_t nu
     else { computeSfcKeys(x, y, z, keys, numKeys, box); }
 }
 
+template<class KeyType>
+extern void clampKeysGpu(KeyType* keys, std::size_t n, KeyType kmin, KeyType kmax);
+
+template<bool useGpu, class KeyType>
+void clampKeys(KeyType* keys, size_t n, KeyType kmin, KeyType kmax)
+{
+    if constexpr (useGpu) { clampKeysGpu(keys, n, kmin, kmax); }
+    else { clampKeys(keys, n, kmin, kmax); }
+}
+
 } // namespace cstone

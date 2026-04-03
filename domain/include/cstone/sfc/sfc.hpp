@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include "cstone/util/strong_type.hpp"
 
 #include "box.hpp"
@@ -271,6 +273,18 @@ void computeSfcKeys(const T* x, const T* y, const T* z, KeyType* particleKeys, s
     for (std::size_t i = 0; i < n; ++i)
     {
         if (particleKeys[i] != removeKey<KeyType>::value) { particleKeys[i] = sfc3D<KeyType>(x[i], y[i], z[i], box); }
+    }
+}
+
+//! @brief apply clamp keys to range [kmin:kmax]
+template<class KeyType>
+void clampKeys(KeyType* particleKeys, std::size_t n, KeyType kmin, KeyType kmax)
+{
+#pragma omp parallel for schedule(static)
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        auto ki         = particleKeys[i];
+        particleKeys[i] = std::clamp(ki, kmin, kmax);
     }
 }
 

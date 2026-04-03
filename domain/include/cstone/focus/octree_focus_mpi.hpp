@@ -352,8 +352,13 @@ public:
     void gatherGlobalLeaves(std::span<T> gLeafQLoc, std::span<T> gLeafQAll) const
     {
         if constexpr (HaveGpu<Accelerator>{}) { syncGpu(); }
-        mpiAllgathervGpuDirect<HaveGpu<Accelerator>{}>(gLeafQLoc.data(), globNumNodes_[myRank_], gLeafQAll.data(),
-                                                       globNumNodes_.data(), globDispl_.data(), comm_);
+        //mpiAllgathervGpuDirect<HaveGpu<Accelerator>{}>(gLeafQLoc.data(), globNumNodes_[myRank_], gLeafQAll.data(),
+        //                                               globNumNodes_.data(), globDispl_.data(), comm_);
+        if (globNumNodes_[myRank_] * myRank_ != globDispl_[myRank_])
+        {
+            throw std::runtime_error("size per rank not equal, need to use allgatherv\n");
+        }
+        mpiAllgatherGpuDirect<HaveGpu<Accelerator>{}>(gLeafQLoc.data(), gLeafQAll.data(), globNumNodes_[myRank_], comm_);
     }
 
     template<class Tm, class DevVec1 = std::vector<LocalIndex>, class DevVec2 = std::vector<LocalIndex>>

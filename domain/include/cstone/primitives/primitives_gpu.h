@@ -15,9 +15,11 @@
 
 #pragma once
 
+#include <cstddef>
 #include <span>
 #include <tuple>
 #include <cstone/tree/definitions.h>
+#include <cstone/util/array.hpp>
 
 namespace cstone
 {
@@ -30,6 +32,13 @@ void scaleGpu(const T1* in1, const T1* in2, T2* out, T3 value);
 
 template<class TS, class TD, class IndexType>
 extern void gatherGpu(const IndexType* ordering, size_t numElements, const TS* src, TD* buffer);
+
+/*! @brief Specialized gather for util::array<T,N>: each GPU thread gathers one scalar element.
+ *  Launches numElements*N threads so that every T within each array is handled independently.
+ */
+template<class T, std::size_t N, class IndexType>
+extern void gatherGpu(const IndexType* ordering, size_t numElements, const util::array<T, N>* src,
+                      util::array<T, N>* buffer);
 
 //! @brief Lambda to avoid templated functors that would become template-template parameters when passed to functions.
 inline auto gatherGpuL = [](std::span<const LocalIndex> ordering, const auto* src, auto* dest)

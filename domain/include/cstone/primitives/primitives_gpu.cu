@@ -93,6 +93,48 @@ template void gatherGpu(const int*, size_t, const uint8_t*, uint32_t*);
 template void gatherGpu(const int*, size_t, const int*, int*);
 template void gatherGpu(const int*, size_t, const uint32_t*, uint32_t*);
 template void gatherGpu(const int*, size_t, const uint64_t*, uint64_t*);
+
+template void gatherGpu(const unsigned*, size_t, const uint8_t*, uint8_t*);
+template void gatherGpu(const unsigned*, size_t, const double*, double*);
+template void gatherGpu(const unsigned*, size_t, const float*, float*);
+template void gatherGpu(const unsigned*, size_t, const char*, char*);
+template void gatherGpu(const unsigned*, size_t, const int*, int*);
+template void gatherGpu(const unsigned*, size_t, const long*, long*);
+template void gatherGpu(const unsigned*, size_t, const unsigned*, unsigned*);
+template void gatherGpu(const unsigned*, size_t, const unsigned long*, unsigned long*);
+template void gatherGpu(const unsigned*, size_t, const unsigned long long*, unsigned long long*);
+
+/*! @brief Specialized gather kernel for util::array<T,N>: each thread gathers one scalar element.
+ *
+ * @param map          gather map of length @p n: destination[i] <- source[map[i]]
+ * @param n            number of util::array elements to gather
+ * @param source       source array of length >= max(map)+1
+ * @param destination  destination array of length >= n
+ *
+ * Launches n*N threads so that every scalar T within each util::array<T,N> is handled
+ * by an independent thread, avoiding per-thread copying of the full array object.
+ */
+template<class T, std::size_t N, class IndexType>
+__global__ void gatherGpuKernel(const IndexType* map, size_t n, const util::array<T, N>* source,
+                                 util::array<T, N>* destination)
+{
+    size_t tid      = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t arrayIdx = tid / N;
+    size_t elemIdx  = tid % N;
+
+    if (arrayIdx < n) { destination[arrayIdx][elemIdx] = source[map[arrayIdx]][elemIdx]; }
+}
+
+template<class T, std::size_t N, class IndexType>
+void gatherGpu(const IndexType* map, size_t n, const util::array<T, N>* source, util::array<T, N>* destination)
+{
+    int numThreads = 256;
+    int numBlocks  = iceil(n * N, numThreads);
+
+    if (numBlocks == 0) { return; }
+    gatherGpuKernel<<<numBlocks, numThreads>>>(map, n, source, destination);
+}
+
 template void gatherGpu(const int*, size_t, const util::array<float, 3>*, util::array<float, 3>*);
 template void gatherGpu(const int*, size_t, const util::array<float, 4>*, util::array<float, 4>*);
 template void gatherGpu(const int*, size_t, const util::array<float, 8>*, util::array<float, 8>*);
@@ -106,15 +148,6 @@ template void gatherGpu(const int*, size_t, const util::array<double, 12>*, util
 template void gatherGpu(const int*, size_t, const util::array<double, 56>*, util::array<double, 56>*);
 template void gatherGpu(const int*, size_t, const util::array<double, 98>*, util::array<double, 98>*);
 
-template void gatherGpu(const unsigned*, size_t, const uint8_t*, uint8_t*);
-template void gatherGpu(const unsigned*, size_t, const double*, double*);
-template void gatherGpu(const unsigned*, size_t, const float*, float*);
-template void gatherGpu(const unsigned*, size_t, const char*, char*);
-template void gatherGpu(const unsigned*, size_t, const int*, int*);
-template void gatherGpu(const unsigned*, size_t, const long*, long*);
-template void gatherGpu(const unsigned*, size_t, const unsigned*, unsigned*);
-template void gatherGpu(const unsigned*, size_t, const unsigned long*, unsigned long*);
-template void gatherGpu(const unsigned*, size_t, const unsigned long long*, unsigned long long*);
 template void gatherGpu(const unsigned*, size_t, const util::array<float, 1>*, util::array<float, 1>*);
 template void gatherGpu(const unsigned*, size_t, const util::array<float, 2>*, util::array<float, 2>*);
 template void gatherGpu(const unsigned*, size_t, const util::array<float, 3>*, util::array<float, 3>*);

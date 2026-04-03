@@ -163,7 +163,7 @@ public:
                           get<1>(scratchBuffers), allocGrowthRate_);
 
         // assert particles are in local subdomain
-        if (!firstSync)
+        if (firstSync)
         {
             KeyType minKey, maxKey;
             if constexpr (useGpu)
@@ -242,7 +242,7 @@ public:
                           get<1>(scratch), allocGrowthRate_);
 
         // assert particles are in local subdomain
-        if (!firstSync)
+        if (firstSync)
         {
             KeyType minKey, maxKey;
             if constexpr (useGpu)

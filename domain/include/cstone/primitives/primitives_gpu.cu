@@ -174,6 +174,38 @@ void scatterGpu(const IndexType* map, size_t n, const T* source, T* destination)
 template void scatterGpu(const int*, size_t, const int*, int*);
 template void scatterGpu(const int*, size_t, const uint32_t*, uint32_t*);
 template void scatterGpu(const int*, size_t, const uint64_t*, uint64_t*);
+
+/*! @brief Specialized scatter kernel for util::array<T,N>: each thread scatters one scalar element.
+ *
+ * @param map          scatter map of length @p n: destination[map[i]] <- source[i]
+ * @param n            number of util::array elements to scatter
+ * @param source       source array of length >= n
+ * @param destination  destination array of length >= max(map)+1
+ *
+ * Launches n*N threads so that every scalar T within each util::array<T,N> is handled
+ * by an independent thread, avoiding per-thread copying of the full array object.
+ */
+template<class T, std::size_t N, class IndexType>
+__global__ void scatterGpuKernel(const IndexType* map, size_t n, const util::array<T, N>* source,
+                                  util::array<T, N>* destination)
+{
+    size_t tid      = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t arrayIdx = tid / N;
+    size_t elemIdx  = tid % N;
+
+    if (arrayIdx < n) { destination[map[arrayIdx]][elemIdx] = source[arrayIdx][elemIdx]; }
+}
+
+template<class T, std::size_t N, class IndexType>
+void scatterGpu(const IndexType* map, size_t n, const util::array<T, N>* source, util::array<T, N>* destination)
+{
+    int numThreads = 256;
+    int numBlocks  = iceil(n * N, numThreads);
+
+    if (numBlocks == 0) { return; }
+    scatterGpuKernel<<<numBlocks, numThreads>>>(map, n, source, destination);
+}
+
 template void scatterGpu(const int*, size_t, const util::array<float, 4>*, util::array<float, 4>*);
 template void scatterGpu(const int*, size_t, const util::array<float, 8>*, util::array<float, 8>*);
 template void scatterGpu(const int*, size_t, const util::array<float, 12>*, util::array<float, 12>*);

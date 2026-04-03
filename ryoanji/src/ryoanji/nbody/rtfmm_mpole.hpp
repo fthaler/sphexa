@@ -273,6 +273,7 @@ inline void checkCublas(cublasStatus_t status)
     if (status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error("CUBLAS error");
 }
 
+//! @brief compute multipoles for the leaves @p leaves[0:numLeaves], not @p multipoles must be zeroed before!
 template<unsigned S, class T1, class T2, class KeyType, class Vector>
 void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNodeIndex* leafToInternal,
               const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
@@ -306,8 +307,7 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
     checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, mp_t2, S,
                      &beta, qEquivAllDevice, S));
 
-    size_t numNodes = numLeaves + (numLeaves - 1) / 7;
-    checkGpuErrors(cudaMemset(multipoles, 0, S * numNodes * sizeof(T2)));
+    checkGpuErrors(cudaMemset(multipoles, 0, S * numLeaves * sizeof(T2)));
     cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),
                        multipoles);
 }

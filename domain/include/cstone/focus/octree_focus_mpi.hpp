@@ -766,6 +766,8 @@ public:
     std::span<const KeyType> treeLeaves() const { return leaves_; }
     //! @brief the assignment of the focus tree leaves to peer ranks
     std::span<const TreeIndexPair> assignment() const { return assignment_; }
+    //! @brief the assignment of the focus tree leaves to peer ranks
+    TreeIndexPair assignedLeafRange() const { return assignment_[myRank_]; }
     //! @brief Expansion (com) centers of each cell
     std::span<const SourceCenterType<RealType>> expansionCentersAcc() const
     {

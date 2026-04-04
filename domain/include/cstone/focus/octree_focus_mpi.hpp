@@ -157,6 +157,12 @@ public:
         std::copy_n(assignment.treeOffsetsConst().begin(), numRanks_ + 1, globDispl_.begin());
         copy(treeletIdx_, treeletIdxAcc_);
 
+        auto csToInt = leafToInternal(octreeAcc_);
+        countsRequests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.view(), assignment_, csToInt,
+                              static_cast<int>(P2pTags::focusPeerCounts), comm_);
+        centersRequests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.view(), assignment_, csToInt,
+                               static_cast<int>(P2pTags::focusPeerCenters), comm_);
+
         /*! Store box for use in all property updates (counts, centers, MACs, etc) until updateTree() is called again.
          *  We store it here in order to disallow calling updateMacs with a changed bounding box, because changing
          *  the bounding box invalidates the expansion centers (centersAcc_)
@@ -261,8 +267,13 @@ public:
     template<class T, class DevVec>
     void peerExchange(std::span<T> q, int tag, DevVec& s) const
     {
-        exchangeTreeletGeneral<T>(interiorPeers_, exteriorPeers_, treeletIdxAcc_.view(), assignment_,
-                                  leafToInternal(octreeAcc_), q, tag, s, comm_);
+        if constexpr (std::is_same_v<T, unsigned>)
+            exchangeTreeletGeneral(q, countsRequests_);
+        else if constexpr (std::is_same_v<T, SType>)
+            exchangeTreeletGeneral(q, centersRequests_);
+        else
+            exchangeTreeletGeneral<T>(interiorPeers_, exteriorPeers_, treeletIdxAcc_.view(), assignment_,
+                                      leafToInternal(octreeAcc_), q, tag, s, comm_);
     }
 
     /*! @brief transfer quantities of leaf cells inside the focus into a global array
@@ -871,6 +882,8 @@ private:
     std::vector<std::vector<KeyType>> treelets_;
     ConcatVector<TreeNodeIndex> treeletIdx_;
     ConcatVector<TreeNodeIndex, AccVector> treeletIdxAcc_;
+    mutable TreeletRequests<unsigned, AccVector<int>> countsRequests_;
+    mutable TreeletRequests<SType, AccVector<int>>    centersRequests_;
 
     std::vector<KeyType> hostPrefixes_;
     OctreeData<KeyType, Accelerator> octreeAcc_;

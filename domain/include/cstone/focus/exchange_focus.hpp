@@ -335,8 +335,10 @@ void exchangeTreeletGeneral(std::span<const int> interiorPeers,
     for (size_t i = 0; i < interiorPeers.size(); ++i)
     {
         gatherAcc<useGpu, TreeNodeIndex>(treeletIdx[interiorPeers[i]], quantities.data(), sendBuffers[i].data());
-        if constexpr (useGpu) { syncGpu(); }
-        assert(sendBuffers[i].size() == treeletIdx[interiorPeers[i]].size());
+    }
+    if constexpr (useGpu) { syncGpu(); }
+    for (size_t i = 0; i < interiorPeers.size(); ++i)
+    {
         mpiSendAsyncAcc<useGpu>(sendBuffers[i].data(), treeletIdx[interiorPeers[i]].size(), interiorPeers[i], commTag,
                                 sendRequests, staging, comm);
     }
@@ -357,7 +359,6 @@ void exchangeTreeletGeneral(std::span<const int> interiorPeers,
         auto mapToInternal = csToInternalMap.subspan(focusAssignment[recvRank].start(), recvCount);
         scatterAcc<useGpu>(mapToInternal, recvBuf, quantities.data());
     }
-    if constexpr (useGpu) { syncGpu(); }
 
     MPI_Waitall(int(sendRequests.size()), sendRequests.data(), MPI_STATUS_IGNORE);
     reallocate(scratch, origSize, 1.0);

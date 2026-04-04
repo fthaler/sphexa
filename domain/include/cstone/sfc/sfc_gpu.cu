@@ -60,6 +60,43 @@ computeSfcKeysGpu(const float*, const float*, const float*, HilbertKey<uint64_t>
 template void
 computeSfcKeysGpu(const double*, const double*, const double*, HilbertKey<uint64_t>*, size_t, const Box<double>&);
 
+template<class KeyType, class T>
+__global__ void
+computeSfcKeysClampKernel(KeyType* keys, const T* x, const T* y, const T* z, size_t numKeys, const Box<T> box,
+                          const Box<T> lbox)
+{
+    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < numKeys)
+    {
+        auto xi       = stl::min(stl::max(x[tid], lbox.xmin()), lbox.xmax());
+        auto yi       = stl::min(stl::max(y[tid], lbox.ymin()), lbox.ymax());
+        auto zi       = stl::min(stl::max(z[tid], lbox.zmin()), lbox.zmax());
+        KeyType rmKey = removeKey<KeyType>{};
+        if (keys[tid] != rmKey) { keys[tid] = sfc3D<KeyType>(xi, yi, zi, box); }
+    }
+}
+
+template<class KeyType, class T>
+void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, const Box<T>& box,
+                            const Box<T>& lbox)
+{
+    if (numKeys == 0) { return; }
+
+    constexpr int threadsPerBlock = 256;
+    computeSfcKeysClampKernel<<<iceil(numKeys, threadsPerBlock), threadsPerBlock>>>(keys, x, y, z, numKeys, box, lbox);
+    checkGpuErrors(cudaGetLastError());
+}
+
+#define COMPUTE_SFC_KEYS_CLAMP_GPU(T, KeyType) \
+template void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, \
+                                     const Box<T>& box, const Box<T>& lbox)
+COMPUTE_SFC_KEYS_CLAMP_GPU(float,  MortonKey<uint32_t>);
+COMPUTE_SFC_KEYS_CLAMP_GPU(double, MortonKey<uint32_t>);
+COMPUTE_SFC_KEYS_CLAMP_GPU(double, MortonKey<uint64_t>);
+COMPUTE_SFC_KEYS_CLAMP_GPU(float,  HilbertKey<uint32_t>);
+COMPUTE_SFC_KEYS_CLAMP_GPU(double, HilbertKey<uint32_t>);
+COMPUTE_SFC_KEYS_CLAMP_GPU(double, HilbertKey<uint64_t>);
+
 template<class KeyType>
 __global__ void
 clampKeysKernel(KeyType* keys, size_t numKeys, KeyType kmin, KeyType kmax)

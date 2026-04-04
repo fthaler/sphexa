@@ -94,6 +94,18 @@ public:
         }
 
         box_ = box;
+        {
+            auto k1 = assignment_[myRank_];
+            auto k2 = assignment_[myRank_ + 1];
+
+            auto localIBox = sfcIBox(sfcKey(k1), treeLevel(k2 - k1));
+            auto [ct, sz]  = centerAndSize<KeyType>(localIBox, box_);
+            auto eps       = Vec3<T>{};
+            eps            = std::numeric_limits<T>::epsilon();
+            sz -= eps;
+            localBox_ = Box<T>(ct[0] - sz[0], ct[0] + sz[0], ct[1] - sz[1], ct[1] + sz[1], ct[2] - sz[2],
+                               ct[2] + sz[2]);
+        }
 
         /*******************************/
         // Global tree, a low-res tree that resolves the domain boundaries, can be only 1 cell per rank
@@ -155,8 +167,17 @@ public:
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratchBuffers);
 
         // Compute and sort SFC keys
-        computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
-        if (!firstSync) { clampKeys<useGpu>(keys.data(), keys.size(), assignment_[myRank_], assignment_[myRank_ + 1]); }
+        if (firstSync)
+        {
+            computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
+        }
+        else
+        {
+            computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
+                                        localBox_);
+        }
+
+        //if (!firstSync) { clampKeys<useGpu>(keys.data(), keys.size(), assignment_[myRank_], assignment_[myRank_ + 1]); }
         sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
         std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
         sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratchBuffers),
@@ -234,8 +255,15 @@ public:
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratch);
 
         // Compute and sort SFC keys
-        computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
-        if (!firstSync) { clampKeys<useGpu>(keys.data(), keys.size(), assignment_[myRank_], assignment_[myRank_ + 1]); }
+        if (firstSync)
+        {
+            computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
+        }
+        else
+        {
+            computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
+                                        localBox_);
+        }
         sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
         std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
         sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratch),
@@ -512,7 +540,7 @@ private:
     BufferDescription bufDesc_{0, 0, 0};
 
     //! @brief global coordinate bounding box
-    Box<T> box_{0, 1};
+    Box<T> box_{0, 1}, localBox_{0, 1};
 
     //! @brief SFC decomposition data
     std::vector<KeyType> globalLeaves_;

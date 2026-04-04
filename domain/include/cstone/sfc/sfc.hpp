@@ -276,6 +276,20 @@ void computeSfcKeys(const T* x, const T* y, const T* z, KeyType* particleKeys, s
     }
 }
 
+template<class T, class KeyType>
+void computeSfcKeysClamp(const T* x, const T* y, const T* z, KeyType* particleKeys, size_t n, const Box<T>& box,
+                         const Box<T>& lbox)
+{
+#pragma omp parallel for schedule(static)
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        auto xi = std::clamp(x[i], lbox.xmin(), lbox.xmax());
+        auto yi = std::clamp(y[i], lbox.ymin(), lbox.ymax());
+        auto zi = std::clamp(z[i], lbox.zmin(), lbox.zmax());
+        if (particleKeys[i] != removeKey<KeyType>::value) { particleKeys[i] = sfc3D<KeyType>(xi, yi, zi, box); }
+    }
+}
+
 //! @brief apply clamp keys to range [kmin:kmax]
 template<class KeyType>
 void clampKeys(KeyType* particleKeys, std::size_t n, KeyType kmin, KeyType kmax)

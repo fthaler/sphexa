@@ -149,7 +149,7 @@ public:
               std::tuple<Vectors&...> scratchBuffers)
     {
         staticChecks<KeyVec, VectorX, Vectors...>(scratchBuffers);
-        checkSizesEqual(x.size(), keys, x, y, z, q, gidx);
+        checkSizesEqual(x.size(), keys, x, y, z, q, gidx, sfcOrder);
         LocalIndex numParticles = x.size();
         bufDesc_ = {0, numParticles, numParticles};
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratchBuffers);

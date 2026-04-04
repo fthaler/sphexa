@@ -94,18 +94,6 @@ public:
         }
 
         box_ = box;
-        {
-            auto k1 = assignment_[myRank_];
-            auto k2 = assignment_[myRank_ + 1];
-
-            auto localIBox = sfcIBox(sfcKey(k1), treeLevel(k2 - k1));
-            auto [ct, sz]  = centerAndSize<KeyType>(localIBox, box_);
-            auto eps       = Vec3<T>{};
-            eps            = std::numeric_limits<T>::epsilon();
-            sz -= eps;
-            localBox_ = Box<T>(ct[0] - sz[0], ct[0] + sz[0], ct[1] - sz[1], ct[1] + sz[1], ct[2] - sz[2],
-                               ct[2] + sz[2]);
-        }
 
         /*******************************/
         // Global tree, a low-res tree that resolves the domain boundaries, can be only 1 cell per rank
@@ -121,6 +109,19 @@ public:
 
         std::vector<unsigned> dummyCounts(nNodes(globalLeaves_), 1);
         assignment_ = makeSfcAssignment(numRanks_, dummyCounts, globalLeaves_.data());
+
+        {
+            auto k1 = assignment_[myRank_];
+            auto k2 = assignment_[myRank_ + 1];
+
+            auto localIBox = sfcIBox(sfcKey(k1), treeLevel(k2 - k1));
+            auto [ct, sz]  = centerAndSize<KeyType>(localIBox, box_);
+            auto eps       = std::numeric_limits<T>::epsilon();
+            sz *= (T(1) - 2 * eps);
+
+            localBox_ = Box<T>(ct[0] - sz[0], ct[0] + sz[0], ct[1] - sz[1], ct[1] + sz[1], ct[2] - sz[2],
+                               ct[2] + sz[2]);
+        }
 
         /*******************************/
         // LET structure build

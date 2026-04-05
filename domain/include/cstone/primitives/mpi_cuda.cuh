@@ -120,7 +120,8 @@ auto mpiAllgatherGpuDirect(const T* src, T* dest, size_t count, MPI_Comm comm)
         MPI_Comm_size(comm, &numRanks);
 
         std::vector<T> srcBuf(count), destBuf(count * numRanks);
-        memcpyD2H(src, count, srcBuf.data());
+        if ((void*)src == MPI_IN_PLACE) { memcpyD2H(dest + count * rank, count, srcBuf.data()); }
+        else { memcpyD2H(src, count, srcBuf.data()); }
         mpiAllgather(srcBuf.data(), destBuf.data(), count, comm);
         memcpyH2D(destBuf.data(), count * numRanks, dest);
     }

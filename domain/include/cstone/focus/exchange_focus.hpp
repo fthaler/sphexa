@@ -348,7 +348,7 @@ public:
      */
     void setup(std::span<const int> interiorPeers,
                std::span<const int> exteriorPeers,
-               std::span<const std::span<const TreeNodeIndex>> treeletIdx,
+               std::vector<std::span<const TreeNodeIndex>> treeletIdx,
                std::span<const IndexPair<TreeNodeIndex>> focusAssignment,
                std::span<const TreeNodeIndex> csToInternalMap,
                int commTag,
@@ -356,7 +356,7 @@ public:
     {
         interiorPeers_.assign(interiorPeers.begin(), interiorPeers.end());
         exteriorPeers_.assign(exteriorPeers.begin(), exteriorPeers.end());
-        treeletIdx_.assign(treeletIdx.begin(), treeletIdx.end());
+        treeletIdx_ = std::move(treeletIdx_);
         focusAssignment_  = focusAssignment;
         csToInternalMap_  = csToInternalMap;
         commTag_          = commTag;
@@ -394,7 +394,7 @@ public:
     std::vector<int>                                interiorPeers_;
     std::vector<int>                                exteriorPeers_;
     std::vector<std::span<const TreeNodeIndex>>     treeletIdx_;
-    std::span<const IndexPair<TreeNodeIndex>>        focusAssignment_;
+    std::span<const IndexPair<TreeNodeIndex>>       focusAssignment_;
     std::span<const TreeNodeIndex>                  csToInternalMap_;
     int                                             commTag_{-1};
     MPI_Comm                                        comm_{MPI_COMM_NULL};
@@ -422,7 +422,10 @@ void exchangeTreeletGeneral(std::span<T> quantities, TreeletRequests<T, BufVec>&
     constexpr bool useGpu = IsDeviceVector<BufVec>{};
 
     for (size_t i = 0; i < requests.interiorPeers_.size(); ++i)
-        gatherAcc<useGpu, TreeNodeIndex>(requests.treeletIdx_[i], quantities.data(), requests.sendSpans_[i].data());
+    {
+        int peer = requests.interiorPeers_[i];
+        gatherAcc<useGpu, TreeNodeIndex>(requests.treeletIdx_[peer], quantities.data(), requests.sendSpans_[i].data());
+    }
     if constexpr (useGpu) { syncGpu(); }
 
     MPI_Startall(int(requests.sendRequests_.size()), requests.sendRequests_.data());

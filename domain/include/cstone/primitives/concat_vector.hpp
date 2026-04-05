@@ -39,6 +39,7 @@ public:
 
     auto view() { return util::packAllocBuffer<T>(buffer_, segmentSizes_, alignmentBytes); }
     auto view() const { return util::packAllocBuffer<const T>(buffer_, segmentSizes_, alignmentBytes); }
+    auto cview() const { return util::packAllocBuffer<const T>(buffer_, segmentSizes_, alignmentBytes); }
 
     auto reindex(std::vector<std::size_t>&& segmentSizes)
     {

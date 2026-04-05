@@ -429,8 +429,8 @@ TEST(DomainGpu, fixedBoundaries)
 
     domain.syncWithHalos(d_keys, d_x, d_y, d_z, d_q, d_gidx, sfcOrder, std::tie(s1, s2));
 
-    auto ftree     = domain.focusTree();
-    auto ftreeView = ftree.octreeViewAcc();
+    const auto& ftree = domain.focusTree();
+    auto ftreeView    = ftree.octreeViewAcc();
 
     auto upsweepCnt = [](auto levelRange, auto childOffsets, auto Q)
     { upsweepSumGpu(maxTreeLevel<KeyType>{}, levelRange.data(), childOffsets, Q); };

@@ -425,7 +425,7 @@ TEST(DomainGpu, fixedBoundaries)
     DeviceVector<Real> d_q = q;
     DeviceVector<int> d_gidx(x.size());
     DeviceVector<KeyType> d_keys(x.size());
-    DeviceVector<LocalIndex> sfcOrder;
+    DeviceVector<LocalIndex> sfcOrder(x.size());
 
     domain.syncWithHalos(d_keys, d_x, d_y, d_z, d_q, d_gidx, sfcOrder, std::tie(s1, s2));
 

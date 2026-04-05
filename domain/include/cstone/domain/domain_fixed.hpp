@@ -228,7 +228,7 @@ public:
                        std::tuple<Vectors&...> scratch)
     {
         staticChecks<KeyVec, VectorX, Vectors...>(scratch);
-        checkSizesEqual(x.size(), keys, x, y, z, q, gidx);
+        checkSizesEqual(x.size(), keys, x, y, z, q, gidx, sfcOrder);
         LocalIndex numParticles = x.size();
         bufDesc_                = {0, numParticles, numParticles};
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratch);

@@ -51,6 +51,9 @@ class FocusedOctree
 
     using SType = SourceCenterType<RealType>;
 
+    using RtfmmP4 = util::array<RealType, 56>;
+    using RtfmmP5 = util::array<RealType, 98>;
+
     constexpr static bool useGpu = HaveGpu<Accelerator>{};
 
 public:
@@ -168,6 +171,10 @@ public:
                               static_cast<int>(P2pTags::focusPeerCounts), comm_);
         centersRequests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
                                static_cast<int>(P2pTags::focusPeerCenters), comm_);
+        rtfmmp4Requests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
+                               static_cast<int>(P2pTags::focusPeerCenters) + 1, comm_);
+        rtfmmp5Requests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
+                               static_cast<int>(P2pTags::focusPeerCenters) + 1, comm_);
 
         /*! Store box for use in all property updates (counts, centers, MACs, etc) until updateTree() is called again.
          *  We store it here in order to disallow calling updateMacs with a changed bounding box, because changing
@@ -277,6 +284,10 @@ public:
             exchangeTreeletGeneral(q, countsRequests_);
         else if constexpr (std::is_same_v<T, SType>)
             exchangeTreeletGeneral(q, centersRequests_);
+        else if constexpr (std::is_same_v<T, RtfmmP4>)
+            exchangeTreeletGeneral(q, rtfmmp4Requests_);
+        else if constexpr (std::is_same_v<T, RtfmmP5>)
+            exchangeTreeletGeneral(q, rtfmmp5Requests_);
         else
             exchangeTreeletGeneral<T>(interiorPeers_, exteriorPeers_, treeletIdxAcc_.view(), assignment_,
                                       leafToInternal(octreeAcc_), q, tag, s, comm_);
@@ -891,8 +902,12 @@ private:
     std::vector<std::vector<KeyType>> treelets_;
     ConcatVector<TreeNodeIndex> treeletIdx_;
     ConcatVector<TreeNodeIndex, AccVector> treeletIdxAcc_;
+
+    //! Buffers for persistent MPI comm. Here for now, but should probably moved else where in a proper implementation
     mutable TreeletRequests<unsigned, AccVector<int>> countsRequests_;
-    mutable TreeletRequests<SType, AccVector<int>>    centersRequests_;
+    mutable TreeletRequests<SType, AccVector<int>> centersRequests_;
+    mutable TreeletRequests<RtfmmP4, AccVector<int>> rtfmmp4Requests_;
+    mutable TreeletRequests<RtfmmP5, AccVector<int>> rtfmmp5Requests_;
 
     std::vector<KeyType> hostPrefixes_;
     OctreeData<KeyType, Accelerator> octreeAcc_;

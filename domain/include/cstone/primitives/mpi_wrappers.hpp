@@ -199,3 +199,35 @@ auto mpiAllgatherv(const Ts* src, int sendCount, Td* dest, const int* counts, co
     std::transform(displ, displ + numRanks, displN.data(), [N](auto x) { return x * N; });
     return mpiAllgatherv(src_ptr, sendCount * N, dest_ptr, countsN.data(), displN.data(), comm);
 }
+
+template<class T, std::enable_if_t<std::is_arithmetic_v<T>, int> = 0>
+auto mpiSendInit(const T* src, int sendCount, int rank, int tag, MPI_Comm comm, MPI_Request* request)
+{
+    return MPI_Send_init(src, sendCount, MpiType<T>{}, rank, tag, comm, request);
+}
+
+template<class T, std::enable_if_t<!std::is_arithmetic_v<T>, int> = 0>
+auto mpiSendInit(const T* src, int sendCount, int rank, int tag, MPI_Comm comm, MPI_Request* request)
+{
+    using ValueType    = typename T::value_type;
+    constexpr size_t N = T{}.size();
+
+    auto src_ptr  = reinterpret_cast<const ValueType*>(src);
+    return mpiSendInit(src_ptr, sendCount * N, rank, tag, comm, request);
+}
+
+template<class T, std::enable_if_t<std::is_arithmetic_v<T>, int> = 0>
+auto mpiRecvInit(T* dest, int recvCount, int rank, int tag, MPI_Comm comm, MPI_Request* request)
+{
+    return MPI_Recv_init(dest, recvCount, MpiType<T>{}, rank, tag, comm, request);
+}
+
+template<class T, std::enable_if_t<!std::is_arithmetic_v<T>, int> = 0>
+auto mpiRecvInit(T* dest, int recvCount, int rank, int tag, MPI_Comm comm, MPI_Request* request)
+{
+    using ValueType    = typename T::value_type;
+    constexpr size_t N = T{}.size();
+
+    auto dest_ptr  = reinterpret_cast<ValueType*>(dest);
+    return mpiRecvInit(dest_ptr, recvCount * N, rank, tag, comm, request);
+}

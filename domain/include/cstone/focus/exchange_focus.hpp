@@ -381,13 +381,14 @@ public:
         sendRequests_.assign(interiorPeers.size(), MPI_REQUEST_NULL);
         recvRequests_.assign(exteriorPeers.size(), MPI_REQUEST_NULL);
 
+        // Todo: will only work with GPU-direct, no versions with staging through host added yet
         for (size_t i = 0; i < interiorPeers.size(); ++i)
-            MPI_Send_init(sendSpans_[i].data(), int(sendSpans_[i].size()), MpiType<T>{}, interiorPeers[i], commTag,
-                          comm, &sendRequests_[i]);
+            mpiSendInit(sendSpans_[i].data(), int(sendSpans_[i].size()), interiorPeers[i], commTag, comm,
+                        &sendRequests_[i]);
 
         for (size_t i = 0; i < exteriorPeers.size(); ++i)
-            MPI_Recv_init(recvSpans_[i].data(), int(recvSpans_[i].size()), MpiType<T>{}, exteriorPeers[i], commTag,
-                          comm, &recvRequests_[i]);
+            mpiRecvInit(recvSpans_[i].data(), int(recvSpans_[i].size()), exteriorPeers[i], commTag, comm,
+                        &recvRequests_[i]);
     }
 
     //! @brief peer lists, buffer spans, and comm metadata for use in exchangeTreeletGeneral

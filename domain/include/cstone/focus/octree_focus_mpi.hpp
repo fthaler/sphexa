@@ -138,8 +138,8 @@ public:
         std::vector<int> extPeers(numRanks_, 1), intPeers;
         if (numRanks_ >= 64) // mixed point-2-point and collective LET exchange
         {
-            auto extPeers = focusPeersAcc<useGpu, KeyType>(globDispl_, assignment_, myRank_, globalLeaves, leaves_);
-            auto intPeers = exchangePeers(extPeers, comm_);
+            extPeers = focusPeersAcc<useGpu, KeyType>(globDispl_, assignment_, myRank_, globalLeaves, leaves_);
+            intPeers = exchangePeers(extPeers, comm_);
         }
         else // point-2-point only collective exchange
         {

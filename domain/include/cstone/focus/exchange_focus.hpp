@@ -429,11 +429,15 @@ void exchangeTreeletGeneral(std::span<T> quantities, TreeletRequests<T, BufVec>&
     }
     if constexpr (useGpu) { syncGpu(); }
 
-    MPI_Startall(int(requests.sendRequests_.size()), requests.sendRequests_.data());
-    MPI_Startall(int(requests.recvRequests_.size()), requests.recvRequests_.data());
+    if (requests.sendRequests_.size())
+        MPI_Startall(int(requests.sendRequests_.size()), requests.sendRequests_.data());
+    if (requests.recvRequests_.size())
+        MPI_Startall(int(requests.recvRequests_.size()), requests.recvRequests_.data());
 
-    MPI_Waitall(int(requests.sendRequests_.size()), requests.sendRequests_.data(), MPI_STATUS_IGNORE);
-    MPI_Waitall(int(requests.recvRequests_.size()), requests.recvRequests_.data(), MPI_STATUS_IGNORE);
+    if (requests.sendRequests_.size())
+        MPI_Waitall(int(requests.sendRequests_.size()), requests.sendRequests_.data(), MPI_STATUS_IGNORE);
+    if (requests.recvRequests_.size())
+        MPI_Waitall(int(requests.recvRequests_.size()), requests.recvRequests_.data(), MPI_STATUS_IGNORE);
 
     for (size_t i = 0; i < requests.exteriorPeers_.size(); ++i)
     {

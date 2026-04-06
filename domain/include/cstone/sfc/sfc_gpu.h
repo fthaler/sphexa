@@ -30,6 +30,18 @@ void computeSfcKeys(const T* x, const T* y, const T* z, KeyType* keys, size_t nu
     else { computeSfcKeys(x, y, z, keys, numKeys, box); }
 }
 
+template<class KeyType, class T>
+extern void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, const Box<T>& box,
+                                   const Box<T>& lbox);
+
+template<bool useGpu, class KeyType, class T>
+void computeSfcKeysClamp(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, const Box<T>& box,
+                         const Box<T>& lbox)
+{
+    if constexpr (useGpu) { computeSfcKeysClampGpu(x, y, z, keys, numKeys, box, lbox); }
+    else { computeSfcKeysClamp(x, y, z, keys, numKeys, box, lbox); }
+}
+
 template<class KeyType>
 extern void clampKeysGpu(KeyType* keys, std::size_t n, KeyType kmin, KeyType kmax);
 

@@ -735,6 +735,7 @@ public:
                         F&& upsweepFunction,
                         UArgs&&... upsweepArgs) const
     {
+        if (exteriorPeers_.size() == interiorPeers_.size() && interiorPeers_.size() == numRanks_ - 1) { return; }
         assert(gOctree.leaves != nullptr);
         std::size_t numGlobalLeaves = gOctree.numLeafNodes;
         std::size_t numLetIdx       = octreeAcc_.numLeafNodes;

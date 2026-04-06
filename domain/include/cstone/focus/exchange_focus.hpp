@@ -303,6 +303,148 @@ void indexTreelets(std::span<const int> peerRanks,
     }
 }
 
+/*! @brief Holds persistent MPI send/recv requests and pre-allocated buffers for repeated peer property exchanges.
+ *
+ * Designed for use with exchangeTreeletGeneral (persistent-MPI overload).
+ * @tparam T      element type for the exchanged quantity (e.g. unsigned, SourceCenterType<RealType>)
+ * @tparam BufVec device- or host-vector type for owned buffers; always instantiated as AccVector<int>
+ *                so that the buffer element type is irrelevant — packAllocBuffer<T> handles the cast.
+ */
+template<class T, class BufVec>
+class TreeletRequests
+{
+    constexpr static bool useGpu        = IsDeviceVector<BufVec>{};
+    constexpr static int alignmentBytes = 2 << 20;
+
+public:
+    TreeletRequests() = default;
+
+    ~TreeletRequests()
+    {
+        for (auto& r : sendRequests_)
+            if (r != MPI_REQUEST_NULL) { MPI_Request_free(&r); }
+        for (auto& r : recvRequests_)
+            if (r != MPI_REQUEST_NULL) { MPI_Request_free(&r); }
+    }
+
+    TreeletRequests(const TreeletRequests&)            = default;
+    TreeletRequests& operator=(const TreeletRequests&) = default;
+
+    TreeletRequests(TreeletRequests&&)            = default;
+    TreeletRequests& operator=(TreeletRequests&&) = default;
+
+    /*! @brief Set up persistent MPI requests for repeated property exchanges with the same tree topology.
+     *
+     * Call once after the tree structure changes (e.g. at the end of FocusedOctree::updateTree).
+     * Allocates send/recv buffers, stores peer metadata, and calls MPI_Send_init / MPI_Recv_init.
+     *
+     * @param interiorPeers    ranks that have local cells in their LET (we send to these)
+     * @param exteriorPeers    ranks with non-local cells in our LET (we receive from these)
+     * @param treeletIdx       per-rank index arrays mapping treelet nodes to local internal nodes
+     * @param focusAssignment  assignment ranges [start, end) per rank in the local focused tree
+     * @param csToInternalMap  mapping from cornerstone leaf index to internal tree node index
+     * @param commTag          MPI tag baked into the persistent requests
+     * @param comm             MPI communicator
+     */
+    void setup(std::span<const int> interiorPeers,
+               std::span<const int> exteriorPeers,
+               std::vector<std::span<const TreeNodeIndex>> treeletIdx,
+               std::span<const IndexPair<TreeNodeIndex>> focusAssignment,
+               std::span<const TreeNodeIndex> csToInternalMap,
+               int commTag,
+               MPI_Comm comm)
+    {
+        interiorPeers_.assign(interiorPeers.begin(), interiorPeers.end());
+        exteriorPeers_.assign(exteriorPeers.begin(), exteriorPeers.end());
+        treeletIdx_ = std::move(treeletIdx);
+        focusAssignment_  = focusAssignment;
+        csToInternalMap_  = csToInternalMap;
+        commTag_          = commTag;
+        comm_             = comm;
+
+        for (auto& r : sendRequests_)
+            if (r != MPI_REQUEST_NULL) { MPI_Request_free(&r); }
+        for (auto& r : recvRequests_)
+            if (r != MPI_REQUEST_NULL) { MPI_Request_free(&r); }
+
+        std::vector<std::size_t> sendSizes(interiorPeers.size());
+        for (size_t i = 0; i < interiorPeers.size(); ++i)
+            sendSizes[i] = treeletIdx_[interiorPeers[i]].size();
+
+        std::vector<std::size_t> recvSizes(exteriorPeers.size());
+        for (size_t i = 0; i < exteriorPeers.size(); ++i)
+            recvSizes[i] = focusAssignment[exteriorPeers[i]].count();
+
+        sendSpans_ = util::packAllocBuffer<T>(devSendBuf_, sendSizes, alignmentBytes);
+        recvSpans_ = util::packAllocBuffer<T>(devRecvBuf_, recvSizes, alignmentBytes);
+
+        sendRequests_.assign(interiorPeers.size(), MPI_REQUEST_NULL);
+        recvRequests_.assign(exteriorPeers.size(), MPI_REQUEST_NULL);
+
+        // Todo: will only work with GPU-direct, no versions with staging through host added yet
+        for (size_t i = 0; i < interiorPeers.size(); ++i)
+            mpiSendInit(sendSpans_[i].data(), int(sendSpans_[i].size()), interiorPeers[i], commTag, comm,
+                        &sendRequests_[i]);
+
+        for (size_t i = 0; i < exteriorPeers.size(); ++i)
+            mpiRecvInit(recvSpans_[i].data(), int(recvSpans_[i].size()), exteriorPeers[i], commTag, comm,
+                        &recvRequests_[i]);
+    }
+
+    //! @brief peer lists, buffer spans, and comm metadata for use in exchangeTreeletGeneral
+    std::vector<int>                                interiorPeers_;
+    std::vector<int>                                exteriorPeers_;
+    std::vector<std::span<const TreeNodeIndex>>     treeletIdx_;
+    std::span<const IndexPair<TreeNodeIndex>>       focusAssignment_;
+    std::span<const TreeNodeIndex>                  csToInternalMap_;
+    int                                             commTag_{-1};
+    MPI_Comm                                        comm_{MPI_COMM_NULL};
+
+    BufVec                        devSendBuf_;
+    BufVec                        devRecvBuf_;
+    std::vector<std::span<T>>     sendSpans_;
+    std::vector<std::span<T>>     recvSpans_;
+    std::vector<MPI_Request>      sendRequests_;
+    std::vector<MPI_Request>      recvRequests_;
+};
+
+/*! @brief Persistent-MPI variant of exchangeTreeletGeneral.
+ *
+ * Uses pre-initialized requests from @p requests (via TreeletRequests::setup) to exchange
+ * cell properties between peer ranks with MPI_Startall / MPI_Waitall instead of
+ * MPI_Isend + MPI_Probe + MPI_Recv. Sends and receives are started simultaneously.
+ *
+ * @param quantities  cell property array to exchange (read and updated in-place)
+ * @param requests    pre-set-up TreeletRequests object for this quantity type
+ */
+template<class T, class BufVec>
+void exchangeTreeletGeneral(std::span<T> quantities, TreeletRequests<T, BufVec>& requests)
+{
+    constexpr bool useGpu = IsDeviceVector<BufVec>{};
+
+    for (size_t i = 0; i < requests.interiorPeers_.size(); ++i)
+    {
+        int peer = requests.interiorPeers_[i];
+        gatherAcc<useGpu, TreeNodeIndex>(requests.treeletIdx_[peer], quantities.data(), requests.sendSpans_[i].data());
+    }
+    if constexpr (useGpu) { syncGpu(); }
+
+    MPI_Startall(int(requests.sendRequests_.size()), requests.sendRequests_.data());
+    MPI_Startall(int(requests.recvRequests_.size()), requests.recvRequests_.data());
+
+    MPI_Waitall(int(requests.sendRequests_.size()), requests.sendRequests_.data(), MPI_STATUS_IGNORE);
+    MPI_Waitall(int(requests.recvRequests_.size()), requests.recvRequests_.data(), MPI_STATUS_IGNORE);
+
+    for (size_t i = 0; i < requests.exteriorPeers_.size(); ++i)
+    {
+        int peer           = requests.exteriorPeers_[i];
+        auto mapToInternal = requests.csToInternalMap_.subspan(requests.focusAssignment_[peer].start(),
+                                                               requests.recvSpans_[i].size());
+        scatterAcc<useGpu>(mapToInternal, requests.recvSpans_[i].data(), quantities.data());
+    }
+    if constexpr (useGpu) { syncGpu(); }
+}
+
 //! @brief send cell properties, send to interior peers, recv from exterior peers
 template<class T, class DevVec>
 void exchangeTreeletGeneral(std::span<const int> interiorPeers,

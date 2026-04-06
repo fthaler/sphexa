@@ -561,7 +561,7 @@ void testFixedBoundaries(bool withHalos)
     domain.setBoundaries(boundaryRankStart, box, maxLevel, theta, comm, s1);
 
     std::vector<KeyType> keys(x.size());
-    std::vector<LocalIndex> sfcOrder;
+    std::vector<LocalIndex> sfcOrder(x.size());
     if (withHalos)
     {
         domain.syncWithHalos(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2));

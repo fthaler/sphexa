@@ -51,6 +51,9 @@ class FocusedOctree
 
     using SType = SourceCenterType<RealType>;
 
+    using RtfmmP4 = util::array<RealType, 56>;
+    using RtfmmP5 = util::array<RealType, 98>;
+
     constexpr static bool useGpu = HaveGpu<Accelerator>{};
 
 public:
@@ -157,6 +160,22 @@ public:
         std::copy_n(assignment.treeOffsetsConst().begin(), numRanks_ + 1, globDispl_.begin());
         copy(treeletIdx_, treeletIdxAcc_);
 
+        // number of nodes that each rank contributes to global tree is equal on all ranks -> can use allgather
+        if (std::count(globNumNodes_.begin(), globNumNodes_.end(), globNumNodes_[0]) == numRanks_)
+        {
+            constNumGlobNodes = true;
+        }
+
+        auto csToInt = leafToInternal(octreeAcc_);
+        countsRequests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
+                              static_cast<int>(P2pTags::focusPeerCounts), comm_);
+        centersRequests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
+                               static_cast<int>(P2pTags::focusPeerCenters), comm_);
+        rtfmmp4Requests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
+                               static_cast<int>(P2pTags::focusPeerCenters) + 1, comm_);
+        rtfmmp5Requests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
+                               static_cast<int>(P2pTags::focusPeerCenters) + 1, comm_);
+
         /*! Store box for use in all property updates (counts, centers, MACs, etc) until updateTree() is called again.
          *  We store it here in order to disallow calling updateMacs with a changed bounding box, because changing
          *  the bounding box invalidates the expansion centers (centersAcc_)
@@ -261,8 +280,17 @@ public:
     template<class T, class DevVec>
     void peerExchange(std::span<T> q, int tag, DevVec& s) const
     {
-        exchangeTreeletGeneral<T>(interiorPeers_, exteriorPeers_, treeletIdxAcc_.view(), assignment_,
-                                  leafToInternal(octreeAcc_), q, tag, s, comm_);
+        if constexpr (std::is_same_v<T, unsigned>)
+            exchangeTreeletGeneral(q, countsRequests_);
+        else if constexpr (std::is_same_v<T, SType>)
+            exchangeTreeletGeneral(q, centersRequests_);
+        else if constexpr (std::is_same_v<T, RtfmmP4>)
+            exchangeTreeletGeneral(q, rtfmmp4Requests_);
+        else if constexpr (std::is_same_v<T, RtfmmP5>)
+            exchangeTreeletGeneral(q, rtfmmp5Requests_);
+        else
+            exchangeTreeletGeneral<T>(interiorPeers_, exteriorPeers_, treeletIdxAcc_.view(), assignment_,
+                                      leafToInternal(octreeAcc_), q, tag, s, comm_);
     }
 
     /*! @brief transfer quantities of leaf cells inside the focus into a global array
@@ -352,13 +380,16 @@ public:
     void gatherGlobalLeaves(std::span<T> gLeafQLoc, std::span<T> gLeafQAll) const
     {
         if constexpr (HaveGpu<Accelerator>{}) { syncGpu(); }
-        //mpiAllgathervGpuDirect<HaveGpu<Accelerator>{}>(gLeafQLoc.data(), globNumNodes_[myRank_], gLeafQAll.data(),
-        //                                               globNumNodes_.data(), globDispl_.data(), comm_);
-        if (globNumNodes_[myRank_] * myRank_ != globDispl_[myRank_])
+        if (constNumGlobNodes)
         {
-            throw std::runtime_error("size per rank not equal, need to use allgatherv\n");
+            mpiAllgatherGpuDirect<HaveGpu<Accelerator>{}>(gLeafQLoc.data(), gLeafQAll.data(), globNumNodes_[myRank_],
+                                                          comm_);
         }
-        mpiAllgatherGpuDirect<HaveGpu<Accelerator>{}>(gLeafQLoc.data(), gLeafQAll.data(), globNumNodes_[myRank_], comm_);
+        else
+        {
+            mpiAllgathervGpuDirect<HaveGpu<Accelerator>{}>(gLeafQLoc.data(), globNumNodes_[myRank_], gLeafQAll.data(),
+                                                           globNumNodes_.data(), globDispl_.data(), comm_);
+        }
     }
 
     template<class Tm, class DevVec1 = std::vector<LocalIndex>, class DevVec2 = std::vector<LocalIndex>>
@@ -873,6 +904,12 @@ private:
     ConcatVector<TreeNodeIndex> treeletIdx_;
     ConcatVector<TreeNodeIndex, AccVector> treeletIdxAcc_;
 
+    //! Buffers for persistent MPI comm. Here for now, but should probably moved else where in a proper implementation
+    mutable TreeletRequests<unsigned, AccVector<int>> countsRequests_;
+    mutable TreeletRequests<SType, AccVector<int>> centersRequests_;
+    mutable TreeletRequests<RtfmmP4, AccVector<int>> rtfmmp4Requests_;
+    mutable TreeletRequests<RtfmmP5, AccVector<int>> rtfmmp5Requests_;
+
     std::vector<KeyType> hostPrefixes_;
     OctreeData<KeyType, Accelerator> octreeAcc_;
 
@@ -899,6 +936,7 @@ private:
     std::vector<TreeIndexPair> assignment_, peerRanges_;
     //! @brief number of global nodes per rank and scan for allgatherv
     std::vector<TreeNodeIndex> globNumNodes_, globDispl_;
+    bool constNumGlobNodes{false};
 
     //! @brief the status of the macs_ and counts_ rebalance criteria
     int rebalanceStatus_{valid};

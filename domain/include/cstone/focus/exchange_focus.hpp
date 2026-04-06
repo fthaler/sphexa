@@ -327,8 +327,8 @@ public:
             if (r != MPI_REQUEST_NULL) { MPI_Request_free(&r); }
     }
 
-    TreeletRequests(const TreeletRequests&)            = delete;
-    TreeletRequests& operator=(const TreeletRequests&) = delete;
+    TreeletRequests(const TreeletRequests&)            = default;
+    TreeletRequests& operator=(const TreeletRequests&) = default;
 
     TreeletRequests(TreeletRequests&&)            = default;
     TreeletRequests& operator=(TreeletRequests&&) = default;
@@ -356,7 +356,7 @@ public:
     {
         interiorPeers_.assign(interiorPeers.begin(), interiorPeers.end());
         exteriorPeers_.assign(exteriorPeers.begin(), exteriorPeers.end());
-        treeletIdx_ = std::move(treeletIdx_);
+        treeletIdx_ = std::move(treeletIdx);
         focusAssignment_  = focusAssignment;
         csToInternalMap_  = csToInternalMap;
         commTag_          = commTag;
@@ -369,7 +369,7 @@ public:
 
         std::vector<std::size_t> sendSizes(interiorPeers.size());
         for (size_t i = 0; i < interiorPeers.size(); ++i)
-            sendSizes[i] = treeletIdx[interiorPeers[i]].size();
+            sendSizes[i] = treeletIdx_[interiorPeers[i]].size();
 
         std::vector<std::size_t> recvSizes(exteriorPeers.size());
         for (size_t i = 0; i < exteriorPeers.size(); ++i)

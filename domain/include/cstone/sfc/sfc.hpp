@@ -208,9 +208,9 @@ HOST_DEVICE_FUN inline KeyType sfc3D(T x, T y, T z, const Box<T>& box, const IBo
     auto [ix, iy, iz] = xyzToGrid<KeyType>(x, y, z, box.xmin(), box.ymin(), box.zmin(), cubeLength * box.ilx(),
                                            cubeLength * box.ily(), cubeLength * box.ilz());
 
-    ix = stl::min(stl::max(ibox.xmin(), ix), ibox.xmax());
-    iy = stl::min(stl::max(ibox.ymin(), iy), ibox.ymax());
-    iz = stl::min(stl::max(ibox.zmin(), iz), ibox.zmax());
+    ix = stl::min(stl::max(ibox.xmin(), ix), ibox.xmax() - 1);
+    iy = stl::min(stl::max(ibox.ymin(), iy), ibox.ymax() - 1);
+    iz = stl::min(stl::max(ibox.zmin(), iz), ibox.zmax() - 1);
 
     return iSfcKey<KeyType>(ix, iy, iz);
 }

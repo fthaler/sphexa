@@ -141,7 +141,7 @@ HOST_DEVICE_FUN inline std::enable_if_t<IsHilbert<KeyType>{}, KeyType> iSfcKey(u
 }
 
 template<class KeyType, class T>
-HOST_DEVICE_FUN inline KeyType sfc3D(T x, T y, T z, T xmin, T ymin, T zmin, T mx, T my, T mz)
+util::array<int, 3> HOST_DEVICE_FUN xyzToGrid(T x, T y, T z, T xmin, T ymin, T zmin, T mx, T my, T mz)
 {
     constexpr int mcoord = (1u << maxTreeLevel<typename KeyType::ValueType>{}) - 1;
 
@@ -152,6 +152,14 @@ HOST_DEVICE_FUN inline KeyType sfc3D(T x, T y, T z, T xmin, T ymin, T zmin, T mx
     ix = stl::min(ix, mcoord);
     iy = stl::min(iy, mcoord);
     iz = stl::min(iz, mcoord);
+
+    return {ix, iy, iz};
+}
+
+template<class KeyType, class T>
+HOST_DEVICE_FUN KeyType sfc3D(T x, T y, T z, T xmin, T ymin, T zmin, T mx, T my, T mz)
+{
+    auto [ix, iy, iz] = xyzToGrid<KeyType>(x, y, z, xmin, ymin, zmin, mx, my, mz);
 
     assert(ix >= 0);
     assert(iy >= 0);
@@ -177,6 +185,34 @@ HOST_DEVICE_FUN inline KeyType sfc3D(T x, T y, T z, const Box<T>& box)
 
     return sfc3D<KeyType>(x, y, z, box.xmin(), box.ymin(), box.zmin(), cubeLength * box.ilx(), cubeLength * box.ily(),
                           cubeLength * box.ilz());
+}
+
+/*! @brief Calculates a Hilbert key for a 3D point within the specified box
+ *
+ * @tparam    KeyType  32- or 64-bit Morton or Hilbert key type.
+ * @param[in] x,y,z    input coordinates within the unit cube [0,1]^3
+ * @param[in] box      bounding for coordinates
+ * @param[in] ibox     clamp range for the integer coordinates of x,y,z projected onto the SFC grid
+ * @return             the SFC key
+ *
+ * The @p ibox argument allows restricting 3D integer coordinates to a (sub-)box corresponding to the local domain
+ *        this can be used to add out-of-local-domain particles to the closest in-local-domain cell.
+ * Note: -KeyType needs to be specified explicitly.
+ *       -not specifying an unsigned type results in a compilation error
+ */
+template<class KeyType, class T>
+HOST_DEVICE_FUN inline KeyType sfc3D(T x, T y, T z, const Box<T>& box, const IBox& ibox)
+{
+    constexpr unsigned cubeLength = (1u << maxTreeLevel<typename KeyType::ValueType>{});
+
+    auto [ix, iy, iz] = xyzToGrid<KeyType>(x, y, z, box.xmin(), box.ymin(), box.zmin(), cubeLength * box.ilx(),
+                                           cubeLength * box.ily(), cubeLength * box.ilz());
+
+    ix = stl::min(stl::max(ibox.xmin(), ix), ibox.xmax());
+    iy = stl::min(stl::max(ibox.ymin(), iy), ibox.ymax());
+    iz = stl::min(stl::max(ibox.zmin(), iz), ibox.zmax());
+
+    return iSfcKey<KeyType>(ix, iy, iz);
 }
 
 //! @brief decode a Morton key
@@ -278,27 +314,15 @@ void computeSfcKeys(const T* x, const T* y, const T* z, KeyType* particleKeys, s
 
 template<class T, class KeyType>
 void computeSfcKeysClamp(const T* x, const T* y, const T* z, KeyType* particleKeys, size_t n, const Box<T>& box,
-                         const Box<T>& lbox)
+                         const IBox& lbox)
 {
 #pragma omp parallel for schedule(static)
     for (std::size_t i = 0; i < n; ++i)
     {
-        auto xi = std::clamp(x[i], lbox.xmin(), lbox.xmax());
-        auto yi = std::clamp(y[i], lbox.ymin(), lbox.ymax());
-        auto zi = std::clamp(z[i], lbox.zmin(), lbox.zmax());
-        if (particleKeys[i] != removeKey<KeyType>::value) { particleKeys[i] = sfc3D<KeyType>(xi, yi, zi, box); }
-    }
-}
-
-//! @brief apply clamp keys to range [kmin:kmax]
-template<class KeyType>
-void clampKeys(KeyType* particleKeys, std::size_t n, KeyType kmin, KeyType kmax)
-{
-#pragma omp parallel for schedule(static)
-    for (std::size_t i = 0; i < n; ++i)
-    {
-        auto ki         = particleKeys[i];
-        particleKeys[i] = std::clamp(ki, kmin, kmax);
+        if (particleKeys[i] != removeKey<KeyType>::value)
+        {
+            particleKeys[i] = sfc3D<KeyType>(x[i], y[i], z[i], box, lbox);
+        }
     }
 }
 

@@ -110,18 +110,9 @@ public:
         std::vector<unsigned> dummyCounts(nNodes(globalLeaves_), 1);
         assignment_ = makeSfcAssignment(numRanks_, dummyCounts, globalLeaves_.data());
 
-        {
-            auto k1 = assignment_[myRank_];
-            auto k2 = assignment_[myRank_ + 1];
-
-            auto localIBox = sfcIBox(sfcKey(k1), treeLevel(k2 - k1));
-            auto [ct, sz]  = centerAndSize<KeyType>(localIBox, box_);
-            auto eps       = std::numeric_limits<T>::epsilon();
-            sz *= (T(1) - 2 * eps);
-
-            localBox_ = Box<T>(ct[0] - sz[0], ct[0] + sz[0], ct[1] - sz[1], ct[1] + sz[1], ct[2] - sz[2],
-                               ct[2] + sz[2]);
-        }
+        auto k1 = assignment_[myRank_];
+        auto k2 = assignment_[myRank_ + 1];
+        localIBox_ = sfcIBox(sfcKey(k1), treeLevel(k2 - k1));
 
         /*******************************/
         // LET structure build
@@ -170,41 +161,14 @@ public:
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratchBuffers);
 
         // Compute and sort SFC keys
-        if (firstSync)
-        {
-            computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
-        }
-        else
-        {
-            computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
-                                        localBox_);
-        }
+        computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
+                                    localIBox_);
 
         //if (!firstSync) { clampKeys<useGpu>(keys.data(), keys.size(), assignment_[myRank_], assignment_[myRank_ + 1]); }
         sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
         std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
         sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratchBuffers),
                           get<1>(scratchBuffers), allocGrowthRate_);
-
-        // assert particles are in local subdomain
-        if (firstSync)
-        {
-            KeyType minKey, maxKey;
-            if constexpr (useGpu)
-            {
-                memcpyD2H(keyView.data(), 1, &minKey);
-                memcpyD2H(keyView.data() + keyView.size() - 1, 1, &maxKey);
-            }
-            else
-            {
-                minKey = keyView.front();
-                maxKey = keyView.back();
-            }
-            if (minKey < assignment_[myRank_] || maxKey >= assignment_[myRank_ + 1])
-            {
-                throw std::runtime_error("keys not in local subdomain\n");
-            }
-        }
 
         // reorder particles to SFC order
         gatherArrays({sfcOrder.data(), nParticles()}, 0, std::tie(x, y, z, q, gidx), scratchBuffers);
@@ -229,8 +193,6 @@ public:
         fill<useGpu>(layoutAcc_.begin() + letLocalRange.end(), layoutAcc_.end(), numParticles);
 
         if constexpr (useGpu) { memcpyD2H(layoutAcc_.data(), layoutAcc_.size(), layout_.data()); }
-
-        firstSync = false;
     }
 
     /*! @brief Call on DD steps.
@@ -258,39 +220,12 @@ public:
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratch);
 
         // Compute and sort SFC keys
-        if (firstSync)
-        {
-            computeSfcKeys<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_);
-        }
-        else
-        {
-            computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
-                                        localBox_);
-        }
+        computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
+                                    localIBox_);
         sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
         std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
         sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratch),
                           get<1>(scratch), allocGrowthRate_);
-
-        // assert particles are in local subdomain
-        if (firstSync)
-        {
-            KeyType minKey, maxKey;
-            if constexpr (useGpu)
-            {
-                memcpyD2H(keyView.data(), 1, &minKey);
-                memcpyD2H(keyView.data() + keyView.size() - 1, 1, &maxKey);
-            }
-            else
-            {
-                minKey = keyView.front();
-                maxKey = keyView.back();
-            }
-            if (minKey < assignment_[myRank_] || maxKey >= assignment_[myRank_ + 1])
-            {
-                throw std::runtime_error("keys not in local subdomain\n");
-            }
-        }
 
         // compute node counts of the global tree
         if constexpr (useGpu)
@@ -324,8 +259,6 @@ public:
         gatherArrays({sfcOrder.data(), nParticles()}, bufDesc_.start, std::tie(x, y, z, q, gidx), scratch);
 
         halos_.exchangeRequests(focusTree_.treeLeaves(), focusTree_.assignment(), layout_);
-
-        firstSync = false;
     }
 
     //! @brief repeat the halo exchange pattern from the previous sync operation for a different set of arrays
@@ -543,7 +476,8 @@ private:
     BufferDescription bufDesc_{0, 0, 0};
 
     //! @brief global coordinate bounding box
-    Box<T> box_{0, 1}, localBox_{0, 1};
+    Box<T> box_{0, 1};
+    IBox localIBox_;
 
     //! @brief SFC decomposition data
     std::vector<KeyType> globalLeaves_;
@@ -571,8 +505,6 @@ private:
 
     //! @brief stores particle offsets to perform halo exchanges
     Halos<KeyType, Accelerator> halos_;
-
-    bool firstSync{true};
 };
 
 } // namespace cstone

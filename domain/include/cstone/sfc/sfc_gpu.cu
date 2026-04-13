@@ -63,22 +63,19 @@ computeSfcKeysGpu(const double*, const double*, const double*, HilbertKey<uint64
 template<class KeyType, class T>
 __global__ void
 computeSfcKeysClampKernel(KeyType* keys, const T* x, const T* y, const T* z, size_t numKeys, const Box<T> box,
-                          const Box<T> lbox)
+                          const IBox lbox)
 {
     size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < numKeys)
     {
-        auto xi       = stl::min(stl::max(x[tid], lbox.xmin()), lbox.xmax());
-        auto yi       = stl::min(stl::max(y[tid], lbox.ymin()), lbox.ymax());
-        auto zi       = stl::min(stl::max(z[tid], lbox.zmin()), lbox.zmax());
         KeyType rmKey = removeKey<KeyType>{};
-        if (keys[tid] != rmKey) { keys[tid] = sfc3D<KeyType>(xi, yi, zi, box); }
+        if (keys[tid] != rmKey) { keys[tid] = sfc3D<KeyType>(x[tid], y[tid], z[tid], box, lbox); }
     }
 }
 
 template<class KeyType, class T>
 void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, const Box<T>& box,
-                            const Box<T>& lbox)
+                            const IBox& lbox)
 {
     if (numKeys == 0) { return; }
 
@@ -89,37 +86,12 @@ void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, s
 
 #define COMPUTE_SFC_KEYS_CLAMP_GPU(T, KeyType) \
 template void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, \
-                                     const Box<T>& box, const Box<T>& lbox)
+                                     const Box<T>& box, const IBox& lbox)
 COMPUTE_SFC_KEYS_CLAMP_GPU(float,  MortonKey<uint32_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(double, MortonKey<uint32_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(double, MortonKey<uint64_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(float,  HilbertKey<uint32_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(double, HilbertKey<uint32_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(double, HilbertKey<uint64_t>);
-
-template<class KeyType>
-__global__ void
-clampKeysKernel(KeyType* keys, size_t numKeys, KeyType kmin, KeyType kmax)
-{
-    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < numKeys)
-    {
-        auto ki = keys[tid];
-        keys[tid] = stl::min(stl::max(ki, kmin), kmax);
-    }
-}
-
-template<class KeyType>
-void clampKeysGpu(KeyType* keys, std::size_t n, KeyType kmin, KeyType kmax)
-{
-    if (n == 0) { return; }
-
-    constexpr int threadsPerBlock = 256;
-    clampKeysKernel<<<iceil(n, threadsPerBlock), threadsPerBlock>>>(keys, n, kmin, kmax);
-    checkGpuErrors(cudaGetLastError());
-}
-
-template void clampKeysGpu(uint32_t*, std::size_t, uint32_t, uint32_t);
-template void clampKeysGpu(uint64_t*, std::size_t, uint64_t, uint64_t);
 
 } // namespace cstone

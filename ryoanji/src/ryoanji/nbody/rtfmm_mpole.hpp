@@ -15,13 +15,7 @@
 
 #pragma once
 
-#ifdef __CUDACC__
-#include <cublas_v2.h>
-
-#include "cstone/cuda/errorcheck.cuh"
-#include "cstone/primitives/primitives_gpu.h"
-#include "cstone/primitives/warpscan.cuh"
-#endif
+#include <span>
 
 #include "kernel.hpp"
 #include "cstone/sfc/common.hpp"
@@ -291,11 +285,6 @@ __global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* 
     }
 }
 
-inline void checkCublas(cublasStatus_t status)
-{
-    if (status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error("CUBLAS error");
-}
-
 //! @brief compute multipoles for the leaves @p leaves[0:numLeaves], not @p multipoles must be zeroed before!
 template<unsigned S, class T1, class T2, class KeyType>
 void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNodeIndex* leafToInternal,
@@ -310,35 +299,8 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
 }
 
 template<unsigned S, class T1, class T2>
-__global__ void rtfmmSetupM2mPointers(TreeNodeIndex numNodes, const TreeNodeIndex* childOffsets,
-                                      const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles,
-                                      RtfmmMultipole<T2, S>* tmp, T2** m2mPtrs, T2** multipolePtrs, T2** tmpPtrs)
-{
-    const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
-
-    TreeNodeIndex i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= numNodes) return;
-
-    multipolePtrs[i] = reinterpret_cast<T2*>(&multipoles[i]);
-    tmpPtrs[i]       = reinterpret_cast<T2*>(&tmp[i]);
-
-    TreeNodeIndex firstChild = childOffsets[i];
-    if (firstChild != 0)
-    {
-        for (int c = 0; c < 8; ++c)
-        {
-            TreeNodeIndex child = firstChild + c;
-            auto          geoDX = geoCenters[i] - geoCenters[child];
-            unsigned octant = unsigned(geoDX[2] < 0) | (unsigned(geoDX[1] < 0) << 1) | (unsigned(geoDX[0] < 0) << 2);
-            m2mPtrs[child]  = const_cast<T2*>(data->m2m[octant]);
-        }
-    }
-}
-
-template<unsigned S, class T2>
-__global__ void rtfmmM2mReduction(TreeNodeIndex firstParent, TreeNodeIndex lastParent,
-                                  const TreeNodeIndex* childOffsets, const RtfmmMultipole<T2, S>* tmp,
-                                  RtfmmMultipole<T2, S>* multipoles)
+__global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastParent, const TreeNodeIndex* childOffsets,
+                               const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
 {
     const int bidx  = blockIdx.x;
     const int tidx  = threadIdx.x;
@@ -346,68 +308,48 @@ __global__ void rtfmmM2mReduction(TreeNodeIndex firstParent, TreeNodeIndex lastP
 
     const TreeNodeIndex parent     = bidx + firstParent;
     const TreeNodeIndex firstChild = childOffsets[parent];
-    if (!firstChild) return;
-
-    auto& output = multipoles[parent];
-
-    for (int i = tidx; i < S; i += thNum)
+    if (!firstChild)
     {
-        T2 sum = 0;
-        for (int j = 0; j < 8; j++)
+        auto& multipole = multipoles[parent];
+        for (int j = tidx; j < S; j += thNum)
+            multipole[j] = 0;
+        return;
+    }
+
+    const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
+
+    T2* m2m[8];
+    for (int c = 0; c < 8; ++c)
+    {
+        TreeNodeIndex child  = firstChild + c;
+        auto          geoDX  = geoCenters[parent] - geoCenters[child];
+        unsigned      octant = unsigned(geoDX[2] < 0) | (unsigned(geoDX[1] < 0) << 1) | (unsigned(geoDX[0] < 0) << 2);
+        m2m[c]               = const_cast<T2*>(data->m2m[octant]);
+    }
+
+    auto& multipole = multipoles[parent];
+    for (int j = tidx; j < S; j += thNum)
+    {
+        T2 dot = 0;
+        for (int c = 0; c < 8; ++c)
         {
-            auto y = tmp[firstChild + j][i];
-            sum += y;
+            for (int k = 0; k < S; ++k)
+                dot += m2m[c][j * S + k] * multipoles[firstChild + c][k];
         }
-        output[i] = sum;
+        multipole[j] = dot;
     }
 }
 
-template<unsigned S, class T1, class T2, class... Vectors>
+template<unsigned S, class T1, class T2>
 void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* childOffsets,
-              const TreeNodeIndex numNodes, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles,
-              cublasHandle_t handle, std::tuple<Vectors&...> scratchBuffers)
+              const TreeNodeIndex numNodes, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
 {
-    constexpr double growthRate = 1.1;
-    static_assert(sizeof...(Vectors) >= 4);
-
-    reallocateBytes(std::get<0>(scratchBuffers), numNodes * sizeof(T2*), growthRate);
-    reallocateBytes(std::get<1>(scratchBuffers), numNodes * sizeof(T2*), growthRate);
-    reallocateBytes(std::get<2>(scratchBuffers), numNodes * sizeof(T2*), growthRate);
-    T2** m2mPtrs       = reinterpret_cast<T2**>(std::get<0>(scratchBuffers).data());
-    T2** multipolePtrs = reinterpret_cast<T2**>(std::get<1>(scratchBuffers).data());
-    T2** tmpPtrs       = reinterpret_cast<T2**>(std::get<2>(scratchBuffers).data());
-
-    reallocateBytes(std::get<3>(scratchBuffers), numNodes * sizeof(RtfmmMultipole<T2, S>), growthRate);
-    RtfmmMultipole<T2, S>* tmp = reinterpret_cast<RtfmmMultipole<T2, S>*>(std::get<3>(scratchBuffers).data());
-
-    {
-        constexpr int blockSize = 256;
-        int           numBlocks = (numNodes + blockSize - 1) / blockSize;
-        rtfmmSetupM2mPointers<S><<<numBlocks, blockSize>>>(numNodes, childOffsets, geoCenters, multipoles, tmp, m2mPtrs,
-                                                           multipolePtrs, tmpPtrs);
-    }
-
-    T2   alpha       = 1;
-    T2   beta        = 0;
-    auto gemvBatched = []<class... Args>(Args&&... args)
-    {
-        if constexpr (std::is_same_v<T2, double>)
-            return cublasDgemvBatched(std::forward<Args>(args)...);
-        else
-            return cublasSgemvBatched(std::forward<Args>(args)...);
-    };
-
     const int numLevels = levelRange.size() - 1;
     for (int level = numLevels - 1; level > 0; level--)
     {
         int batchCount = levelRange[level + 1] - levelRange[level];
         if (batchCount)
         {
-            int offset = levelRange[level];
-
-            checkCublas(gemvBatched(handle, CUBLAS_OP_T, S, S, &alpha, m2mPtrs + offset, S, multipolePtrs + offset, 1,
-                                    &beta, tmpPtrs + offset, 1, batchCount));
-
             int firstParent = levelRange[level - 1];
             int lastParent  = levelRange[level];
             int numParents  = lastParent - firstParent;
@@ -415,7 +357,8 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
             {
                 constexpr int blockSize = std::min(S, 1024u);
                 int           numBlocks = numParents;
-                rtfmmM2mReduction<S><<<numBlocks, blockSize>>>(firstParent, lastParent, childOffsets, tmp, multipoles);
+                rtfmmM2mKernel<S>
+                    <<<numBlocks, blockSize>>>(firstParent, lastParent, childOffsets, geoCenters, multipoles);
             }
         }
     }

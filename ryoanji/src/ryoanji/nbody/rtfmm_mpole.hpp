@@ -221,7 +221,7 @@ void rtfmmFinalize();
 template<unsigned S, class T1, class T2, class KeyType>
 __global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* q, const TreeNodeIndex* leafToInternal,
                                const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout,
-                               const cstone::Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
+                               const cstone::Vec3<T1>* geoCenters, T2* qEquivAllDevice)
 {
     const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
 
@@ -237,8 +237,6 @@ __global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* 
 
     const int offset = layout[bidx];
     const int count  = layout[bidx + 1] - offset;
-
-    __shared__ T2 qEquiv[S], tmp[S];
 
     for (int j = tidx; j < S; j += thNum)
     {
@@ -260,42 +258,47 @@ __global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* 
             T2 r2 = dx * dx + dy * dy + dz * dz;
             p += qi / std::sqrt(r2);
         }
-        qEquiv[j] = p * scale;
-    }
-
-    __syncthreads();
-
-    for (int j = tidx; j < S; j += thNum)
-    {
-        T2 dot = 0;
-        for (int k = 0; k < S; ++k)
-            dot += data->UT[j * S + k] * qEquiv[k];
-        tmp[j] = dot;
-    }
-
-    auto& multipole = multipoles[internalIdx];
-    __syncthreads();
-
-    for (int j = tidx; j < S; j += thNum)
-    {
-        T2 dot = 0;
-        for (int k = 0; k < S; ++k)
-            dot += data->vSinv[j * S + k] * tmp[k];
-        multipole[j] = dot;
+        qEquivAllDevice[bidx * S + j] = p * scale;
     }
 }
 
 //! @brief compute multipoles for the leaves @p leaves[0:numLeaves], not @p multipoles must be zeroed before!
-template<unsigned S, class T1, class T2, class KeyType>
+template<unsigned S, class T1, class T2, class KeyType, class Vector>
 void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNodeIndex* leafToInternal,
               const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
-              RtfmmMultipole<T2, S>* multipoles)
+              RtfmmMultipole<T2, S>* multipoles, cublasHandle_t handle, Vector& scratchBuffer)
 {
+    reallocateBytes(scratchBuffer, S * numLeaves * sizeof(T2), 1.1);
+    T2* qEquivAllDevice = reinterpret_cast<T2*>(scratchBuffer.data());
+
     const int blockNum  = numLeaves;
     const int blockSize = std::min(S, 1024u);
 
+    // TODO: CUDA stream
     rtfmmP2mKernel<S>
-        <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, multipoles);
+        <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, qEquivAllDevice);
+
+    GlobalData<T1, T2, S>* data;
+    checkGpuErrors(cudaMemcpyFromSymbol(&data, globalDataDevice, sizeof(void*)));
+
+    T2   alpha = 1;
+    T2   beta  = 0;
+    auto gemm  = []<class... Args>(Args&&... args)
+    {
+        if constexpr (std::is_same_v<T2, double>)
+            return cublasDgemm(std::forward<Args>(args)...);
+        else
+            return cublasSgemm(std::forward<Args>(args)...);
+    };
+    auto* mp_t2 = reinterpret_cast<T2*>(multipoles);
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->UT, S, qEquivAllDevice, S, &beta,
+                     mp_t2, S));
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, mp_t2, S,
+                     &beta, qEquivAllDevice, S));
+
+    checkGpuErrors(cudaMemset(multipoles, 0, S * numLeaves * sizeof(T2)));
+    cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),
+                       multipoles);
 }
 
 template<unsigned ThreadsPerRow, unsigned RowsPerBlock, unsigned S, class T1, class T2>

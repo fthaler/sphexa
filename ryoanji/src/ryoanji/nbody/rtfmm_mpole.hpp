@@ -298,21 +298,18 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
         <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, multipoles);
 }
 
-template<unsigned S, class T1, class T2>
+template<unsigned ThreadsPerRow, unsigned RowsPerBlock, unsigned S, class T1, class T2>
 __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastParent, const TreeNodeIndex* childOffsets,
                                const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
 {
-    const int bidx  = blockIdx.x;
-    const int tidx  = threadIdx.x;
-    const int thNum = blockDim.x;
-
-    const TreeNodeIndex parent     = bidx + firstParent;
+    const TreeNodeIndex parent     = blockIdx.z + firstParent;
     const TreeNodeIndex firstChild = childOffsets[parent];
     if (!firstChild) return;
 
     const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
 
     T2* m2m[8];
+#pragma unroll
     for (int c = 0; c < 8; ++c)
     {
         TreeNodeIndex child  = firstChild + c;
@@ -321,17 +318,37 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
         m2m[c]               = const_cast<T2*>(data->m2m[octant]);
     }
 
-    auto& multipole = multipoles[parent];
-    for (int j = tidx; j < S; j += thNum)
+    constexpr unsigned tileSize = 4 * ThreadsPerRow;
+    const unsigned     row      = blockIdx.x * RowsPerBlock + threadIdx.y;
+    if (row >= S) return;
+
+    T2 accum = 0;
+    for (unsigned k0 = 0; k0 + tileSize <= S; k0 += tileSize)
     {
-        T2 dot = 0;
+        unsigned k = k0 + threadIdx.x * 4;
+
+#pragma unroll
         for (int c = 0; c < 8; ++c)
         {
-            for (int k = 0; k < S; ++k)
-                dot += m2m[c][j * S + k] * multipoles[firstChild + c][k];
+            float4 a = *reinterpret_cast<float4*>(&m2m[c][row * S + k]);
+            float4 b = *reinterpret_cast<float4*>(&multipoles[firstChild + c][k]);
+
+            accum += a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
         }
-        multipole[j] = dot;
     }
+
+    for (unsigned k = (S / tileSize) * tileSize + threadIdx.x; k < S; k += ThreadsPerRow)
+    {
+#pragma unroll
+        for (int c = 0; c < 8; ++c)
+            accum += m2m[c][row * S + k] * multipoles[firstChild + c][k];
+    }
+
+#pragma unroll
+    for (unsigned offset = ThreadsPerRow / 2; offset > 0; offset >>= 1)
+        accum += __shfl_down_sync(0xffffffffu, accum, offset, ThreadsPerRow);
+
+    if (threadIdx.x == 0) multipoles[parent][row] = accum;
 }
 
 template<unsigned S, class T1, class T2>
@@ -344,14 +361,16 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
         int batchCount = levelRange[level + 1] - levelRange[level];
         if (batchCount)
         {
-            int firstParent = levelRange[level - 1];
-            int lastParent  = levelRange[level];
-            int numParents  = lastParent - firstParent;
+            unsigned firstParent = levelRange[level - 1];
+            unsigned lastParent  = levelRange[level];
+            unsigned numParents  = lastParent - firstParent;
             if (numParents)
             {
-                constexpr int blockSize = std::min(S, 1024u);
-                int           numBlocks = numParents;
-                rtfmmM2mKernel<S>
+                constexpr unsigned threadsPerRow = 8;
+                constexpr unsigned rowsPerBlock  = 16;
+                constexpr dim3     blockSize     = {threadsPerRow, rowsPerBlock, 1};
+                const dim3         numBlocks     = {(S + rowsPerBlock - 1) / rowsPerBlock, 1, numParents};
+                rtfmmM2mKernel<threadsPerRow, rowsPerBlock, S>
                     <<<numBlocks, blockSize>>>(firstParent, lastParent, childOffsets, geoCenters, multipoles);
             }
         }

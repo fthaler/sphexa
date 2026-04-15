@@ -136,10 +136,20 @@ public:
         downloadTreeToHost();
     }
 
+    //! @brief Compute particle SFC keys from particle coordinates, particles outside the local domain will be assigned
+    //!        to the closest local cell
+    template<class KeyVec, class VectorX>
+    void computeKeys(KeyVec& keys, VectorX& x, VectorX& y, VectorX& z)
+    {
+        computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
+                                    localIBox_);
+    }
+
     /*! @brief Call on DD steps.
      *
      *        Preconditions: - keys,x,y,z,q must have equal size. sfcOrder will be resized
      *                       - setBoundaries() has been called
+     *                       - keys contain the desired SFC keys in same order as x,y,z,q starting from index 0
      *        Does: - Particle SFC sort
      *              - LET local particle indexing, i.e. tree cell offsets and particle counts
      *        Does not do: - communication
@@ -160,11 +170,8 @@ public:
         bufDesc_ = {0, numParticles, numParticles};
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratchBuffers);
 
-        // Compute and sort SFC keys
-        computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
-                                    localIBox_);
+        // Don't forget you need to have valid keys here
 
-        //if (!firstSync) { clampKeys<useGpu>(keys.data(), keys.size(), assignment_[myRank_], assignment_[myRank_ + 1]); }
         sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
         std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
         sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratchBuffers),

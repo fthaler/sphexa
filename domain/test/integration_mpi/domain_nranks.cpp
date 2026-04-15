@@ -567,7 +567,11 @@ void testFixedBoundaries(bool withHalos)
         domain.syncWithHalos(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2));
         domain.exchangeHalos(std::tie(x, y, z, q), s1, s2);
     }
-    else { domain.sync(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2)); }
+    else
+    {
+        domain.computeKeys(keys, x, y, z);
+        domain.sync(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2));
+    }
 
     std::vector<KeyType> testKeys(x.size());
     computeSfcKeys(x.data(), y.data(), z.data(), sfcKindPointer(testKeys.data()), x.size(), box);

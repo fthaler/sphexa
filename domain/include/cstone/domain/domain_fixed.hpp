@@ -180,16 +180,8 @@ public:
         auto leafCounts    = focusTree_.leafCountsAcc();
         auto letLocalRange = focusTree_.assignment()[myRank_];
 
-        if constexpr (useGpu)
-        {
-            exclusiveScanGpu(leafCounts.data() + letLocalRange.start(), leafCounts.data() + letLocalRange.end(),
-                             layoutAcc_.data() + letLocalRange.start(), LocalIndex(0));
-        }
-        else
-        {
-            std::exclusive_scan(leafCounts.begin() + letLocalRange.start(), leafCounts.begin() + letLocalRange.end(),
-                                layoutAcc_.begin() + letLocalRange.start(), LocalIndex(0));
-        }
+        exclusiveScan<useGpu>(leafCounts.data() + letLocalRange.start(), leafCounts.data() + letLocalRange.end(),
+                              layoutAcc_.data() + letLocalRange.start(), LocalIndex(0));
         fill<useGpu>(layoutAcc_.begin() + letLocalRange.end(), layoutAcc_.end(), numParticles);
 
         if constexpr (useGpu) { memcpyD2H(layoutAcc_.data(), layoutAcc_.size(), layout_.data()); }

@@ -39,7 +39,7 @@ namespace cstone
  */
 template<class T, class KeyVec>
 void computeKeysFromCellAssignment(const Box<T>& globBox,
-                                   int* numAtomsInCells,
+                                   const int* numAtomsInCells,
                                    Vec3<int> numCells_xyz,
                                    Vec3<T> gridLowerCorner,
                                    Vec3<T> gridUpperCorner,

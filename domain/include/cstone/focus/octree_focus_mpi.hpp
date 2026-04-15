@@ -73,6 +73,7 @@ public:
         , centersAcc_(1)
         , globNumNodes_(numRanks)
         , globDispl_(numRanks + 1)
+        , skipCollectiveLetPath_(numRanks_ < 64) // do only point-to-point exchanges fewer than 64 ranks
     {
         octreeAcc_.resize(1);
         leaves_        = std::vector<KeyType>{0, nodeRange<KeyType>(0)};
@@ -117,6 +118,9 @@ public:
 
         std::span enforcedKeys = globalLeaves.subspan(assignment.treeOffsetsConst()[myRank_],
                                                       assignment.numNodesPerRankConst()[myRank_] + 1);
+        // LET must resolve all peer boundaries if we skip the collective path
+        if (skipCollectiveLetPath_) { enforcedKeys = globalLeaves; }
+
         bool converged;
         if constexpr (HaveGpu<Accelerator>{})
         {
@@ -136,15 +140,12 @@ public:
         translateAssignment<KeyType>(assignment, leaves_, assignment_);
 
         std::vector<int> extPeers(numRanks_, 1), intPeers;
-        if (numRanks_ >= 64) // mixed point-2-point and collective LET exchange
+        extPeers[myRank_] = 0;
+        intPeers          = extPeers;
+        if (not skipCollectiveLetPath_)
         {
             extPeers = focusPeersAcc<useGpu, KeyType>(globDispl_, assignment_, myRank_, globalLeaves, leaves_);
             intPeers = exchangePeers(extPeers, comm_);
-        }
-        else // point-2-point only collective exchange
-        {
-            extPeers[myRank_] = 0;
-            intPeers          = extPeers;
         }
 
         peerFlagsToList(extPeers, exteriorPeers_, PeerMask::focus);
@@ -174,7 +175,7 @@ public:
         // number of nodes that each rank contributes to global tree is equal on all ranks -> can use allgather
         if (std::count(globNumNodes_.begin(), globNumNodes_.end(), globNumNodes_[0]) == numRanks_)
         {
-            constNumGlobNodes = true;
+            constNumGlobNodes_ = true;
         }
 
         auto csToInt = leafToInternal(octreeAcc_);
@@ -391,7 +392,7 @@ public:
     void gatherGlobalLeaves(std::span<T> gLeafQLoc, std::span<T> gLeafQAll) const
     {
         if constexpr (HaveGpu<Accelerator>{}) { syncGpu(); }
-        if (constNumGlobNodes)
+        if (constNumGlobNodes_)
         {
             mpiAllgatherGpuDirect<HaveGpu<Accelerator>{}>(gLeafQLoc.data(), gLeafQAll.data(), globNumNodes_[myRank_],
                                                           comm_);
@@ -947,7 +948,8 @@ private:
     std::vector<TreeIndexPair> assignment_, peerRanges_;
     //! @brief number of global nodes per rank and scan for allgatherv
     std::vector<TreeNodeIndex> globNumNodes_, globDispl_;
-    bool constNumGlobNodes{false};
+    bool constNumGlobNodes_{false};
+    bool skipCollectiveLetPath_{false};
 
     //! @brief the status of the macs_ and counts_ rebalance criteria
     int rebalanceStatus_{valid};

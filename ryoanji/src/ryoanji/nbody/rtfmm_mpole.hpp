@@ -308,13 +308,7 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
 
     const TreeNodeIndex parent     = bidx + firstParent;
     const TreeNodeIndex firstChild = childOffsets[parent];
-    if (!firstChild)
-    {
-        auto& multipole = multipoles[parent];
-        for (int j = tidx; j < S; j += thNum)
-            multipole[j] = 0;
-        return;
-    }
+    if (!firstChild) return;
 
     const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
 

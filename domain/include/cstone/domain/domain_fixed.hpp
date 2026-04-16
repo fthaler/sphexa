@@ -248,6 +248,8 @@ public:
         focusTree_.updateCounts(keyView, {globalLeavesAcc_.data(), globalLeavesAcc_.size()},
                                 {globalLeafCountsAcc_.data(), globalLeafCountsAcc_.size()}, std::get<0>(scratch));
 
+        focusTree_.pruneTreelets();
+
         focusTree_.computeLayout({rawPtr(layoutAcc_), layoutAcc_.size()}, layout_);
         if constexpr (not useGpu) { layoutAcc_ = layout_; }
 

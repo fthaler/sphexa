@@ -328,6 +328,54 @@ public:
         }
     }
 
+    void pruneTreelets()
+    {
+        std::vector<std::vector<TreeNodeIndex>> prunedTreelets(numRanks_);
+        // internal side
+        auto treelets = treeletIdx_.cview();
+        for (int r = 0; r < numRanks_; ++r)
+        {
+            for (int i = 0; i < treelets[r].size(); ++i)
+            {
+                if (countsAcc_[i]) { prunedTreelets[r].push_back(i); }
+            }
+        }
+        {
+            std::vector<size_t> sizes(numRanks_);
+            for (int r = 0; r < numRanks_; ++r)
+                sizes[r] = prunedTreelets[r].size();
+            treeletIdxPruned_.reindex(std::move(sizes));
+            auto tlview = treeletIdxPruned_.view();
+
+            for (int r = 0; r < numRanks_; ++r)
+                std::copy(prunedTreelets[r].begin(), prunedTreelets[r].end(), tlview[r].begin());
+        }
+
+        // external side
+        std::vector<std::vector<TreeNodeIndex>> prunedCsToInternal(numRanks_);
+        for (int r = 0; r < numRanks_; ++r)
+        {
+            if (r == myRank_) { continue; }
+            std::span<const TreeNodeIndex> mapToInternal =
+                leafToInternal(octreeAcc_).subspan(assignment_[r].start(), assignment_[r].count());
+            for (int i = 0; i < mapToInternal.size(); ++i)
+            {
+                int intIdx = mapToInternal[i];
+                if (countsAcc_[intIdx]) { prunedCsToInternal[r].push_back(intIdx); }
+            }
+        }
+        {
+            std::vector<size_t> sizes(numRanks_);
+            for (int r = 0; r < numRanks_; ++r)
+                sizes[r] = prunedCsToInternal[r].size();
+            csToInternalPruned_.reindex(std::move(sizes));
+            auto tlview = csToInternalPruned_.view();
+
+            for (int r = 0; r < numRanks_; ++r)
+                std::copy(prunedTreelets[r].begin(), prunedTreelets[r].end(), tlview[r].begin());
+        }
+    }
+
     /*! @brief transfer quantities of leaf cells inside the focus into a global array
      *
      * @tparam     T                 an arithmetic type or compile-time constant size arrays thereof
@@ -938,6 +986,10 @@ private:
     std::vector<std::vector<KeyType>> treelets_;
     ConcatVector<TreeNodeIndex> treeletIdx_;
     ConcatVector<TreeNodeIndex, AccVector> treeletIdxAcc_;
+
+    //! @brief same as treeletIdx_, but with empty
+    ConcatVector<TreeNodeIndex> treeletIdxPruned_;
+    ConcatVector<TreeNodeIndex> csToInternalPruned_;
 
     //! Buffers for persistent MPI comm. Here for now, but should probably moved else where in a proper implementation
     template<class Q>

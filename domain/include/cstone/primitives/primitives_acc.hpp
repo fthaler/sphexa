@@ -120,4 +120,18 @@ void sortByKey(std::span<KeyType> keys, std::span<ValueType> values, KeyBuf& key
     else { sort_by_key(keys.begin(), keys.end(), values.begin()); }
 }
 
+template<bool useGpu, class IndexType, class SumType>
+void exclusiveScan(const IndexType* first, const IndexType* last, SumType* output, SumType init)
+{
+    if constexpr (useGpu) { exclusiveScanGpu(first, last, output, init); }
+    else { std::exclusive_scan(first, last, output, init); }
+}
+
+template<bool useGpu, class IndexType, class SumType>
+void inclusiveScan(const IndexType* first, const IndexType* last, SumType* output)
+{
+    if constexpr (useGpu) { inclusiveScanGpu(first, last, output); }
+    else { std::inclusive_scan(first, last, output); }
+}
+
 } // namespace cstone

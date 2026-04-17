@@ -1,6 +1,7 @@
 
 set(UNIT_TESTS
         domain/domaindecomp.cpp
+        domain/domain_fixed.cpp
         domain/index_ranges.cpp
         domain/layout.cpp
         fields/field_get.cpp

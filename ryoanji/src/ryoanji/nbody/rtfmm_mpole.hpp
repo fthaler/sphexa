@@ -15,6 +15,13 @@
 
 #pragma once
 
+#ifdef __CUDACC__
+#include <cublas_v2.h>
+
+#include "cstone/cuda/errorcheck.cuh"
+#include "cstone/primitives/primitives_gpu.h"
+#endif
+
 #include <span>
 
 #include "kernel.hpp"
@@ -260,6 +267,11 @@ __global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* 
         }
         qEquivAllDevice[bidx * S + j] = p * scale;
     }
+}
+
+inline void checkCublas(cublasStatus_t status)
+{
+    if (status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error("CUBLAS error");
 }
 
 //! @brief compute multipoles for the leaves @p leaves[0:numLeaves], not @p multipoles must be zeroed before!

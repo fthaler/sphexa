@@ -33,12 +33,14 @@ namespace ryoanji
 template<class Tc, class T, unsigned S>
 struct GlobalData
 {
+    static constexpr unsigned paddedStride = (S + 16 / sizeof(T) - 1) / (16 / sizeof(T)) * (16 / sizeof(T));
+
     Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
     T  UT[S * S];
     T  vSinv[S * S];
     T  vSinvUT[S * S];
-    T  m2m[8][S * S];
-    T  r0;
+    alignas(16) T m2m[8][S * paddedStride];
+    T r0;
 };
 
 extern void* globalData;
@@ -152,7 +154,7 @@ HOST_DEVICE_FUN void addMultipole(RtfmmMultipole<T, S>& composite, const Vec3<Tc
     {
         T ci = 0;
         for (unsigned j = 0; j < S; ++j)
-            ci += m2m[i * S + j] * addend[j];
+            ci += m2m[i * data->paddedStride + j] * addend[j];
         composite[i] += ci;
     }
 }
@@ -305,8 +307,8 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
     auto* mp_t2 = reinterpret_cast<T2*>(multipoles);
     checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->UT, S, qEquivAllDevice, S, &beta,
                      mp_t2, S));
-    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, mp_t2, S,
-                     &beta, qEquivAllDevice, S));
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, mp_t2, S, &beta,
+                     qEquivAllDevice, S));
 
     checkGpuErrors(cudaMemset(multipoles, 0, S * numLeaves * sizeof(T2)));
     cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),
@@ -345,8 +347,17 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
 #pragma unroll
         for (int c = 0; c < 8; ++c)
         {
-            float4 a = *reinterpret_cast<float4*>(&m2m[c][row * S + k]);
-            float4 b = *reinterpret_cast<float4*>(&multipoles[firstChild + c][k]);
+            float4 a = *reinterpret_cast<float4*>(&m2m[c][row * data->paddedStride + k]);
+            float4 b;
+            if constexpr ((sizeof(T2) * S) % 16 == 0)
+            {
+                b = *reinterpret_cast<float4*>(&multipoles[firstChild + c][k]);
+            }
+            else
+            {
+                b = {multipoles[firstChild + c][k], multipoles[firstChild + c][k + 1],
+                     multipoles[firstChild + c][k + 2], multipoles[firstChild + c][k + 3]};
+            }
 
             accum += a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
         }
@@ -356,7 +367,7 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
     {
 #pragma unroll
         for (int c = 0; c < 8; ++c)
-            accum += m2m[c][row * S + k] * multipoles[firstChild + c][k];
+            accum += m2m[c][row * data->paddedStride + k] * multipoles[firstChild + c][k];
     }
 
 #pragma unroll

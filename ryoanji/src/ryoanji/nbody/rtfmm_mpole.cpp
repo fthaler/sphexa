@@ -259,7 +259,7 @@ void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
         auto                          m1                = matMatMul(S, S, S, utM2mPrecompute, ce2pcUpPrecompute);
         auto                          m2m               = matMatMul(S, S, S, vsinvM2mPrecompute, m1);
         for (int i = 0; i < S; ++i)
-            std::copy_n(m2m.data() + i * S, S, globalData->m2m[octant] + i * globalData->paddedStride);
+            std::copy_n(m2m.data() + i * S, S, globalData->m2m[octant] + i * globalData->S_padded);
     }
 }
 

@@ -30,17 +30,32 @@
 namespace ryoanji
 {
 
+/*! @brief Translation matrices for equivalence charges
+ *
+ * @tparam Tc   the xyz coordinate type, float or double
+ * @tparam T    the multipole moment type, float or double
+ * @tparam S    number of elements per multipole
+ */
 template<class Tc, class T, unsigned S>
 struct GlobalData
 {
-    static constexpr unsigned paddedStride = (S + 16 / sizeof(T) - 1) / (16 / sizeof(T)) * (16 / sizeof(T));
+    /*! @brief We want to align buffers to this size so we can load with float4 or double4_a16
+     *
+     * float 4 has to be 16-byte aligned, double4 is deprecated in favor of double4_a16 or double4_a32
+     * We use 16-byte alignment, as that's the current maximum supported global load transaction size
+     */
+    static constexpr unsigned T4_alignment = 16;
 
-    Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
-    T  UT[S * S];
-    T  vSinv[S * S];
-    T  vSinvUT[S * S];
-    alignas(16) T m2m[8][S * paddedStride];
-    T r0;
+    static constexpr unsigned T4_a_elem = T4_alignment / sizeof(T);
+    //! @brief S padded to multiple of 16-byte size
+    static constexpr unsigned S_padded  = (S + T4_a_elem - 1) / T4_a_elem * T4_a_elem;
+
+    Tc                      surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
+    T                       UT[S * S];
+    T                       vSinv[S * S];
+    T                       vSinvUT[S * S];
+    alignas(T4_alignment) T m2m[8][S * S_padded];
+    T                       r0;
 };
 
 extern void* globalData;
@@ -154,7 +169,7 @@ HOST_DEVICE_FUN void addMultipole(RtfmmMultipole<T, S>& composite, const Vec3<Tc
     {
         T ci = 0;
         for (unsigned j = 0; j < S; ++j)
-            ci += m2m[i * data->paddedStride + j] * addend[j];
+            ci += m2m[i * data->S_padded + j] * addend[j];
         composite[i] += ci;
     }
 }
@@ -347,11 +362,12 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
 #pragma unroll
         for (int c = 0; c < 8; ++c)
         {
-            float4 a = *reinterpret_cast<float4*>(&m2m[c][row * data->paddedStride + k]);
-            float4 b;
-            if constexpr ((sizeof(T2) * S) % 16 == 0)
+            using T2_4 = std::conditional_t<std::is_same_v<T2, float>, float4, double4_16a>;
+            T2_4 a = *reinterpret_cast<T2_4*>(&m2m[c][row * data->S_padded + k]);
+            T2_4 b;
+            if constexpr ((sizeof(T2) * S) % GlobalData<T1, T2, S>::T4_alignment == 0)
             {
-                b = *reinterpret_cast<float4*>(&multipoles[firstChild + c][k]);
+                b = *reinterpret_cast<T2_4*>(&multipoles[firstChild + c][k]);
             }
             else
             {
@@ -367,7 +383,7 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
     {
 #pragma unroll
         for (int c = 0; c < 8; ++c)
-            accum += m2m[c][row * data->paddedStride + k] * multipoles[firstChild + c][k];
+            accum += m2m[c][row * data->S_padded + k] * multipoles[firstChild + c][k];
     }
 
 #pragma unroll

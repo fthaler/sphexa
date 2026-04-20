@@ -46,6 +46,14 @@ struct GlobalData
      */
     static constexpr unsigned T4_alignment = 16;
 
+#if __CUDACC_VER_MAJOR__ >= 13
+    using Double4a16 = double4_16a;
+#else
+    using Double4a16 = double4;
+#endif
+
+    using T4 = std::conditional_t<std::is_same_v<T, float>, float4, Double4a16>;
+
     static constexpr unsigned T4_a_elem = T4_alignment / sizeof(T);
     //! @brief S padded to multiple of 16-byte size
     static constexpr unsigned S_padded  = (S + T4_a_elem - 1) / T4_a_elem * T4_a_elem;
@@ -362,7 +370,7 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
 #pragma unroll
         for (int c = 0; c < 8; ++c)
         {
-            using T2_4 = std::conditional_t<std::is_same_v<T2, float>, float4, double4_16a>;
+            using T2_4 = GlobalData<T1, T2, S>::T4;
             T2_4 a = *reinterpret_cast<T2_4*>(&m2m[c][row * data->S_padded + k]);
             T2_4 b;
             if constexpr ((sizeof(T2) * S) % GlobalData<T1, T2, S>::T4_alignment == 0)

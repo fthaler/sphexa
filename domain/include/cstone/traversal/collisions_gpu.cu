@@ -82,6 +82,7 @@ void findHalosGpu(const KeyType* prefixes,
                                uint8_t* collisionFlags)
 
 FIND_HALOS_GPU(uint32_t, float);
+FIND_HALOS_GPU(uint32_t, double);
 FIND_HALOS_GPU(uint64_t, float);
 FIND_HALOS_GPU(uint64_t, double);
 
@@ -144,6 +145,7 @@ void markMacsGpu(const KeyType* prefixes,
 
 MARK_MACS_GPU(uint64_t, double);
 MARK_MACS_GPU(uint64_t, float);
+MARK_MACS_GPU(unsigned, double);
 MARK_MACS_GPU(unsigned, float);
 
 } // namespace cstone

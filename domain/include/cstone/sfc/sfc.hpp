@@ -18,6 +18,7 @@
 #pragma once
 
 #include <algorithm>
+#include <span>
 
 #include "cstone/util/strong_type.hpp"
 
@@ -250,6 +251,47 @@ template<class KeyType>
 HOST_DEVICE_FUN inline IBox sfcIBox(KeyType keyStart, KeyType keyEnd) noexcept
 {
     return sfcIBox(keyStart, treeLevel(keyEnd - keyStart));
+}
+
+template<class KeyType>
+IBox assignmentIBox(KeyType keyStart, KeyType keyEnd)
+{
+    constexpr int maxSpanKeys = 4;
+    TreeNodeIndex numSpanKeys = spanSfcRange(keyStart, keyEnd);
+    if (numSpanKeys > maxSpanKeys)
+    {
+        throw std::runtime_error("This should be used with regular grids where assignment is 4 boxes maximum\n");
+    }
+
+    KeyType spanKeys[maxSpanKeys + 1];
+    spanSfcRange(keyStart, keyEnd, spanKeys);
+    spanKeys[numSpanKeys] = keyEnd;
+
+    IBox boxesBuf[maxSpanKeys];
+    for (TreeNodeIndex i = 0; i < numSpanKeys; ++i)
+    {
+        boxesBuf[i] = sfcIBox(SfcKind(spanKeys[i]), treeLevel(spanKeys[i + 1] - spanKeys[i]));
+    }
+    std::span<IBox> spanBoxes(boxesBuf, numSpanKeys);
+
+    int maxc = 1 << maxTreeLevel<KeyType>{};
+    int xmin = maxc, xmax = 0, ymin = maxc, ymax = 0, zmin = maxc, zmax = 0;
+
+    for (auto& ibox : spanBoxes)
+        xmin = std::min(xmin, ibox.xmin());
+    for (auto& ibox : spanBoxes)
+        ymin = std::min(ymin, ibox.ymin());
+    for (auto& ibox : spanBoxes)
+        zmin = std::min(zmin, ibox.zmin());
+
+    for (auto& ibox : spanBoxes)
+        xmax = std::max(xmax, ibox.xmax());
+    for (auto& ibox : spanBoxes)
+        ymax = std::max(ymax, ibox.ymax());
+    for (auto& ibox : spanBoxes)
+        zmax = std::max(zmax, ibox.zmax());
+
+    return IBox{xmin, xmax, ymin, ymax, zmin, zmax};
 }
 
 //! @brief Compute the smallest octree node in placeholder-bit format that contains the given floating point box

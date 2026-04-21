@@ -115,7 +115,7 @@ public:
 
         auto k1 = assignment_[myRank_];
         auto k2 = assignment_[myRank_ + 1];
-        localIBox_ = {0, maxCoord<KeyType>{}, 0, maxCoord<KeyType>{}, 0, maxCoord<KeyType>{}};
+        localIBox_ = assignmentIBox(k1, k2);
 
         /*******************************/
         // LET structure build

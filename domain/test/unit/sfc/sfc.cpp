@@ -58,3 +58,16 @@ TEST(SFC, center)
         EXPECT_EQ(octalDigit(probe, 1), octalDigit(ref, 1));
     }
 }
+
+TEST(SFC, assignmentIBox)
+{
+    using KeyType = unsigned;
+
+    KeyType k1 = 012;
+    KeyType k2 = 014;
+    IBox probe = assignmentIBox(decodePlaceholderBit(k1), decodePlaceholderBit(k2));
+
+    IBox ref{0, 512, 512, 1024, 0, 1024};
+
+    EXPECT_EQ(probe, ref);
+}

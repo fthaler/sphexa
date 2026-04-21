@@ -282,9 +282,20 @@ void rtfmmInit(Tc r0)
 #endif
 }
 
-template void rtfmmInit<double, double, 4>(double);
-template void rtfmmInit<float, float, 4>(float);
-template void rtfmmInit<double, double, 5>(double);
-template void rtfmmInit<float, float, 5>(float);
+#define RTFMM_INIT(P) \
+    template void rtfmmInit<double, double, P>(double); \
+    template void rtfmmInit<float, float, P>(float);
+
+RTFMM_INIT(2);
+RTFMM_INIT(3);
+RTFMM_INIT(4);
+RTFMM_INIT(5);
+RTFMM_INIT(6);
+RTFMM_INIT(7);
+RTFMM_INIT(8);
+RTFMM_INIT(9);
+RTFMM_INIT(10);
+RTFMM_INIT(11);
+RTFMM_INIT(12);
 
 } // namespace ryoanji

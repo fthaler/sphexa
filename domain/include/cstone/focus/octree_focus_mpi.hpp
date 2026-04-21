@@ -41,6 +41,11 @@ inline std::vector<int> exchangePeers(std::span<const int> exteriorPeers, MPI_Co
     return interiorPeers;
 }
 
+namespace detail
+{
+constexpr int pToNumSurf(int p) { return 6u * (p - 1) * (p - 1) + 2u; }
+}
+
 //! @brief A fully traversable octree with a local focus
 template<class KeyType, class RealType, class Accelerator = CpuTag>
 class FocusedOctree
@@ -51,8 +56,13 @@ class FocusedOctree
 
     using SType = SourceCenterType<RealType>;
 
-    using RtfmmP4 = util::array<RealType, 56>;
-    using RtfmmP5 = util::array<RealType, 98>;
+    // Todo: perhaps not the best location to put this
+    template<std::size_t P>
+    using M_ = util::array<RealType, detail::pToNumSurf(P)>;
+
+    //! @brief types for which the persistent MPI peer exchange path can be activated
+    using PersistentExchangeTypes = util::TypeList<
+        unsigned, SType, M_<2>, M_<3>, M_<4>, M_<5>, M_<6>, M_<7>, M_<8>, M_<9>, M_<10>, M_<11>, M_<12>>;
 
     constexpr static bool useGpu = HaveGpu<Accelerator>{};
 
@@ -178,15 +188,8 @@ public:
             constNumGlobNodes_ = true;
         }
 
-        auto csToInt = leafToInternal(octreeAcc_);
-        countsRequests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
-                              static_cast<int>(P2pTags::focusPeerCounts), comm_);
-        centersRequests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
-                               static_cast<int>(P2pTags::focusPeerCenters), comm_);
-        rtfmmp4Requests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
-                               static_cast<int>(P2pTags::focusPeerCenters) + 1, comm_);
-        rtfmmp5Requests_.setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(), assignment_, csToInt,
-                               static_cast<int>(P2pTags::focusPeerCenters) + 1, comm_);
+        // prevent client from reusing old persistent requests after the tree structure changed
+        util::for_each_tuple([](auto& request){ request.clear(); }, persistentReqs_);
 
         /*! Store box for use in all property updates (counts, centers, MACs, etc) until updateTree() is called again.
          *  We store it here in order to disallow calling updateMacs with a changed bounding box, because changing
@@ -289,20 +292,40 @@ public:
         rebalanceStatus_ |= countsCriterion;
     }
 
+    //! @brief Create persistent MPI requests for type @tparam T for current tree structure
+    template<class T>
+    void createPersistentRequests()
+    {
+        if (util::Contains<T, PersistentExchangeTypes>{})
+        {
+            auto csToInt            = leafToInternal(octreeAcc_);
+            constexpr int typeIndex = util::FindIndex<T, PersistentExchangeTypes>{};
+            std::get<typeIndex>(persistentReqs_).setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(),
+                                                       assignment_, csToInt,
+                                                       static_cast<int>(P2pTags::focusPeerCenters) + typeIndex, comm_);
+        }
+    }
+
+    void createPersistentMultipoleRequests(int p)
+    {
+        auto regMPole_ = [this](auto index) { this->createPersistentRequests<M_<index>>(); };
+        util::createSwitch(p, util::make_index_sequence_from<2, 12>{}, regMPole_);
+    }
+
     template<class T, class DevVec>
     void peerExchange(std::span<T> q, int tag, DevVec& s) const
     {
-        if constexpr (std::is_same_v<T, unsigned>)
-            exchangeTreeletGeneral(q, countsRequests_);
-        else if constexpr (std::is_same_v<T, SType>)
-            exchangeTreeletGeneral(q, centersRequests_);
-        else if constexpr (std::is_same_v<T, RtfmmP4>)
-            exchangeTreeletGeneral(q, rtfmmp4Requests_);
-        else if constexpr (std::is_same_v<T, RtfmmP5>)
-            exchangeTreeletGeneral(q, rtfmmp5Requests_);
+        constexpr int typeIndex = util::FindIndex<T, PersistentExchangeTypes>{};
+        if (typeIndex < util::TypeListSize<PersistentExchangeTypes>{} &&
+            std::get<typeIndex>(persistentReqs_).isInitialized())
+        {
+            exchangeTreeletGeneral(q, std::get<typeIndex>(persistentReqs_));
+        }
         else
+        {
             exchangeTreeletGeneral<T>(interiorPeers_, exteriorPeers_, treeletIdxAcc_.view(), assignment_,
                                       leafToInternal(octreeAcc_), q, tag, s, comm_);
+        }
     }
 
     /*! @brief transfer quantities of leaf cells inside the focus into a global array
@@ -917,10 +940,9 @@ private:
     ConcatVector<TreeNodeIndex, AccVector> treeletIdxAcc_;
 
     //! Buffers for persistent MPI comm. Here for now, but should probably moved else where in a proper implementation
-    mutable TreeletRequests<unsigned, AccVector<int>> countsRequests_;
-    mutable TreeletRequests<SType, AccVector<int>> centersRequests_;
-    mutable TreeletRequests<RtfmmP4, AccVector<int>> rtfmmp4Requests_;
-    mutable TreeletRequests<RtfmmP5, AccVector<int>> rtfmmp5Requests_;
+    template<class Q>
+    using TLR = TreeletRequests<Q, AccVector<int>>;
+    mutable util::Reduce<std::tuple, util::Map<TLR, PersistentExchangeTypes>> persistentReqs_;
 
     std::vector<KeyType> hostPrefixes_;
     OctreeData<KeyType, Accelerator> octreeAcc_;

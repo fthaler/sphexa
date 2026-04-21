@@ -241,8 +241,17 @@ HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>*
         M2M<T, S, Tm>(begin, end, Xout, Xsrc, geoXout, geoXsrc, Msrc, Mout);                                           \
     }
 
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(2))
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(3))
 INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(4))
 INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(5))
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(6))
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(7))
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(8))
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(9))
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(10))
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(11))
+INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(12))
 
 template<class Tc, class T, unsigned P>
 void rtfmmInit(Tc r0);

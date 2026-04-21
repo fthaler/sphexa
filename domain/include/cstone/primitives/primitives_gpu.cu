@@ -135,18 +135,24 @@ void gatherGpu(const IndexType* map, size_t n, const util::array<T, N>* source, 
     gatherGpuKernel<<<numBlocks, numThreads>>>(map, n, source, destination);
 }
 
-template void gatherGpu(const int*, size_t, const util::array<float, 3>*, util::array<float, 3>*);
-template void gatherGpu(const int*, size_t, const util::array<float, 4>*, util::array<float, 4>*);
-template void gatherGpu(const int*, size_t, const util::array<float, 8>*, util::array<float, 8>*);
-template void gatherGpu(const int*, size_t, const util::array<float, 12>*, util::array<float, 12>*);
-template void gatherGpu(const int*, size_t, const util::array<float, 56>*, util::array<float, 56>*);
-template void gatherGpu(const int*, size_t, const util::array<float, 98>*, util::array<float, 98>*);
-template void gatherGpu(const int*, size_t, const util::array<double, 3>*, util::array<double, 3>*);
-template void gatherGpu(const int*, size_t, const util::array<double, 4>*, util::array<double, 4>*);
-template void gatherGpu(const int*, size_t, const util::array<double, 8>*, util::array<double, 8>*);
-template void gatherGpu(const int*, size_t, const util::array<double, 12>*, util::array<double, 12>*);
-template void gatherGpu(const int*, size_t, const util::array<double, 56>*, util::array<double, 56>*);
-template void gatherGpu(const int*, size_t, const util::array<double, 98>*, util::array<double, 98>*);
+#define GATHER_GPU_ARRAY(S) \
+template void gatherGpu(const int*, size_t, const util::array<float, S>*, util::array<float, S>*); \
+template void gatherGpu(const int*, size_t, const util::array<double, S>*, util::array<double, S>*);
+
+GATHER_GPU_ARRAY(3);
+GATHER_GPU_ARRAY(4);
+GATHER_GPU_ARRAY(8);
+GATHER_GPU_ARRAY(12);
+GATHER_GPU_ARRAY(26);
+GATHER_GPU_ARRAY(56);
+GATHER_GPU_ARRAY(98);
+GATHER_GPU_ARRAY(152);
+GATHER_GPU_ARRAY(218);
+GATHER_GPU_ARRAY(296);
+GATHER_GPU_ARRAY(386);
+GATHER_GPU_ARRAY(488);
+GATHER_GPU_ARRAY(602);
+GATHER_GPU_ARRAY(728);
 
 template void gatherGpu(const unsigned*, size_t, const util::array<float, 1>*, util::array<float, 1>*);
 template void gatherGpu(const unsigned*, size_t, const util::array<float, 2>*, util::array<float, 2>*);
@@ -206,16 +212,23 @@ void scatterGpu(const IndexType* map, size_t n, const util::array<T, N>* source,
     scatterGpuKernel<<<numBlocks, numThreads>>>(map, n, source, destination);
 }
 
-template void scatterGpu(const int*, size_t, const util::array<float, 4>*, util::array<float, 4>*);
-template void scatterGpu(const int*, size_t, const util::array<float, 8>*, util::array<float, 8>*);
-template void scatterGpu(const int*, size_t, const util::array<float, 12>*, util::array<float, 12>*);
-template void scatterGpu(const int*, size_t, const util::array<float, 56>*, util::array<float, 56>*);
-template void scatterGpu(const int*, size_t, const util::array<float, 98>*, util::array<float, 98>*);
-template void scatterGpu(const int*, size_t, const util::array<double, 4>*, util::array<double, 4>*);
-template void scatterGpu(const int*, size_t, const util::array<double, 8>*, util::array<double, 8>*);
-template void scatterGpu(const int*, size_t, const util::array<double, 12>*, util::array<double, 12>*);
-template void scatterGpu(const int*, size_t, const util::array<double, 56>*, util::array<double, 56>*);
-template void scatterGpu(const int*, size_t, const util::array<double, 98>*, util::array<double, 98>*);
+#define SCATTER_GPU_ARRAY(S) \
+template void scatterGpu(const int*, size_t, const util::array<float, S>*, util::array<float, S>*); \
+template void scatterGpu(const int*, size_t, const util::array<double, S>*, util::array<double, S>*);
+
+SCATTER_GPU_ARRAY(4);
+SCATTER_GPU_ARRAY(8);
+SCATTER_GPU_ARRAY(12);
+SCATTER_GPU_ARRAY(26);
+SCATTER_GPU_ARRAY(56);
+SCATTER_GPU_ARRAY(98);
+SCATTER_GPU_ARRAY(152);
+SCATTER_GPU_ARRAY(218);
+SCATTER_GPU_ARRAY(296);
+SCATTER_GPU_ARRAY(386);
+SCATTER_GPU_ARRAY(488);
+SCATTER_GPU_ARRAY(602);
+SCATTER_GPU_ARRAY(728);
 
 template<class T, class IndexType>
 __global__ void
@@ -239,19 +252,24 @@ void gatherScatterGpu(const IndexType* gmap, const IndexType* smap, size_t n, co
 template void gatherScatterGpu(const int*, const int*, size_t, const int*, int*);
 template void gatherScatterGpu(const int*, const int*, size_t, const uint32_t*, uint32_t*);
 template void gatherScatterGpu(const int*, const int*, size_t, const uint64_t*, uint64_t*);
-template void gatherScatterGpu(const int*, const int*, size_t, const util::array<float, 4>*, util::array<float, 4>*);
-template void gatherScatterGpu(const int*, const int*, size_t, const util::array<float, 8>*, util::array<float, 8>*);
-template void gatherScatterGpu(const int*, const int*, size_t, const util::array<float, 12>*, util::array<float, 12>*);
-template void gatherScatterGpu(const int*, const int*, size_t, const util::array<float, 56>*, util::array<float, 56>*);
-template void gatherScatterGpu(const int*, const int*, size_t, const util::array<float, 98>*, util::array<float, 98>*);
-template void gatherScatterGpu(const int*, const int*, size_t, const util::array<double, 4>*, util::array<double, 4>*);
-template void gatherScatterGpu(const int*, const int*, size_t, const util::array<double, 8>*, util::array<double, 8>*);
-template void
-gatherScatterGpu(const int*, const int*, size_t, const util::array<double, 12>*, util::array<double, 12>*);
-template void
-gatherScatterGpu(const int*, const int*, size_t, const util::array<double, 56>*, util::array<double, 56>*);
-template void
-gatherScatterGpu(const int*, const int*, size_t, const util::array<double, 98>*, util::array<double, 98>*);
+
+#define GATHER_SCATTER_GPU_ARRAY(S) \
+template void gatherScatterGpu(const int*, const int*, size_t, const util::array<float, S>*, util::array<float, S>*); \
+template void gatherScatterGpu(const int*, const int*, size_t, const util::array<double, S>*, util::array<double, S>*);
+
+GATHER_SCATTER_GPU_ARRAY(4);
+GATHER_SCATTER_GPU_ARRAY(8);
+GATHER_SCATTER_GPU_ARRAY(12);
+GATHER_SCATTER_GPU_ARRAY(26);
+GATHER_SCATTER_GPU_ARRAY(56);
+GATHER_SCATTER_GPU_ARRAY(98);
+GATHER_SCATTER_GPU_ARRAY(152);
+GATHER_SCATTER_GPU_ARRAY(218);
+GATHER_SCATTER_GPU_ARRAY(296);
+GATHER_SCATTER_GPU_ARRAY(386);
+GATHER_SCATTER_GPU_ARRAY(488);
+GATHER_SCATTER_GPU_ARRAY(602);
+GATHER_SCATTER_GPU_ARRAY(728);
 
 template<class T>
 std::tuple<T, T> MinMaxGpu<T>::operator()(const T* first, const T* last)

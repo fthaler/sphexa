@@ -337,4 +337,61 @@ auto subsetIndices(TypeList<Ts1...> /*subList*/, TypeList<Ts2...> /*baseList*/)
     return std::index_sequence<FindIndex<Ts1, TypeList<Ts2...>>{}...>{};
 }
 
+template<std::size_t Offset, std::size_t... Is>
+constexpr auto offset_sequence(std::index_sequence<Is...>)
+    -> std::index_sequence<(Is + Offset)...>;
+
+//! @brief create a sequence Start, Start + 1, ..., End. Includes End.
+template<std::size_t Start, std::size_t End>
+using make_index_sequence_from =
+decltype(offset_sequence<Start>(std::make_index_sequence<End + 1 - Start>{}));
+
+/*! @brief create a switch on @p runtimeIndex with CompileTimeIndices as the possible cases
+ *
+ * @tparam CompileTimeIndices  integer sequence of possible switch case values
+ * @tparam F                   callable object taking a compile time integer, e.g integral_constant<int, N>
+ * @param runtimeIndex         runtime value to call f with
+ * @param f                    callable of type F
+ * @return                     f(integral_constant<int, runtimeIndex>{})
+ *
+ * f is called with the compile time constant value of runtimeIndex.
+ * This function (createSwitch) is equivalent to:
+ *
+ * switch(runtimeIndex)
+ * {
+ *   case 0: f(integral_constant<int, 0>{}); break;
+ *   case 1: f(integral_constant<int, 1>{}); break;
+ *   ...
+ * }
+ */
+template<std::size_t... CompileTimeIndices, class F>
+HOST_DEVICE_FUN auto createSwitch(std::size_t runtimeIndex,
+                                  std::integer_sequence<std::size_t, CompileTimeIndices...>,
+                                  F&& f)
+{
+    using ReturnType_ =
+        std::common_type_t<decltype(f(stl::integral_constant<std::size_t, CompileTimeIndices>{}))...>;
+    constexpr bool isAssignable = std::is_assignable_v<ReturnType_, ReturnType_>;
+    using ReturnType            = std::conditional_t<isAssignable, ReturnType_, void>;
+
+    if constexpr (isAssignable)
+    {
+        ReturnType ret;
+        [[maybe_unused]] std::initializer_list<int> list{(
+            runtimeIndex == CompileTimeIndices
+                ? (ret = f(stl::integral_constant<std::size_t, CompileTimeIndices>{})),
+                  0
+                : 0)...};
+        return ret;
+    }
+    else
+    {
+        [[maybe_unused]] std::initializer_list<int> list{(
+            runtimeIndex == CompileTimeIndices
+                ? f(stl::integral_constant<std::size_t, CompileTimeIndices>{}),
+                  0
+                : 0)...};
+    }
+}
+
 } // namespace util

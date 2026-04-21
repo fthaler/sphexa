@@ -54,6 +54,8 @@ public:
     {
     }
 
+    void createPersistentMultipoleRequests(int p) { focusTree_.createPersistentMultipoleRequests(p); }
+
     /*! @brief set the SFC domain decomposition boundaries and update the LET structure
      *
      * @param[in] boundaries     SFC boundary start of each rank

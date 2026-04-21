@@ -391,6 +391,14 @@ public:
                         &recvRequests_[i]);
     }
 
+    void clear()
+    {
+        comm_    = MPI_COMM_NULL;
+        commTag_ = -1;
+    }
+
+    bool isInitialized() { return commTag_ >= 0; }
+
     //! @brief peer lists, buffer spans, and comm metadata for use in exchangeTreeletGeneral
     std::vector<int>                                interiorPeers_;
     std::vector<int>                                exteriorPeers_;

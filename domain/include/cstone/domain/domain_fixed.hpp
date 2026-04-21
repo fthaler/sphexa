@@ -113,7 +113,7 @@ public:
 
         auto k1 = assignment_[myRank_];
         auto k2 = assignment_[myRank_ + 1];
-        localIBox_ = sfcIBox(sfcKey(k1), treeLevel(k2 - k1));
+        localIBox_ = {0, maxCoord<KeyType>{}, 0, maxCoord<KeyType>{}, 0, maxCoord<KeyType>{}};
 
         /*******************************/
         // LET structure build

@@ -57,6 +57,13 @@ extern void scatterGpu(const IndexType* ordering, size_t numElements, const util
 template<class T, class IndexType>
 extern void gatherScatterGpu(const IndexType* gmap, const IndexType* smap, size_t numElements, const T* src, T* buffer);
 
+/*! @brief Specialized gatherScatter for util::array<T,N>: each GPU thread scatters one scalar element.
+ *  Launches numElements*N threads so that every T within each array is handled independently.
+ */
+template<class T, std::size_t N, class IndexType>
+extern void gatherScatterGpu(const IndexType* gmap, const IndexType* smap, size_t numElements,
+                             const util::array<T, N>* src, util::array<T, N>* buffer);
+
 template<class T>
 struct MinMaxGpu
 {

@@ -253,6 +253,29 @@ template void gatherScatterGpu(const int*, const int*, size_t, const int*, int*)
 template void gatherScatterGpu(const int*, const int*, size_t, const uint32_t*, uint32_t*);
 template void gatherScatterGpu(const int*, const int*, size_t, const uint64_t*, uint64_t*);
 
+template<class T, std::size_t N, class IndexType>
+__global__ void
+gatherScatterGpuKernel(const IndexType* gmap, const IndexType* smap, size_t n, const util::array<T, N>* source,
+                       util::array<T, N>* destination)
+{
+    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t arrayIdx = tid / N;
+    size_t elemIdx  = tid % N;
+
+    if (arrayIdx < n) { destination[smap[arrayIdx]][elemIdx] = source[gmap[arrayIdx]][elemIdx]; }
+}
+
+template<class T, std::size_t N, class IndexType>
+void gatherScatterGpu(const IndexType* gmap, const IndexType* smap, size_t n, const util::array<T, N>* source,
+                      util::array<T, N>* destination)
+{
+    int numThreads = 256;
+    int numBlocks  = iceil(n * N, numThreads);
+
+    if (numBlocks == 0) { return; }
+    gatherScatterGpuKernel<<<numBlocks, numThreads>>>(gmap, smap, n, source, destination);
+}
+
 #define GATHER_SCATTER_GPU_ARRAY(S) \
 template void gatherScatterGpu(const int*, const int*, size_t, const util::array<float, S>*, util::array<float, S>*); \
 template void gatherScatterGpu(const int*, const int*, size_t, const util::array<double, S>*, util::array<double, S>*);

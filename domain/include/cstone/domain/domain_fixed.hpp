@@ -197,6 +197,64 @@ public:
         if constexpr (useGpu) { memcpyD2H(layoutAcc_.data(), layoutAcc_.size(), layout_.data()); }
     }
 
+    template<class KeyVec, class VectorX, class VectorI, class VectorJ, class... Vectors>
+    void syncPrune(KeyVec& keys,
+                   VectorX& x,
+                   VectorX& y,
+                   VectorX& z,
+                   VectorX& q,
+                   VectorI& gidx,
+                   VectorJ& sfcOrder,
+                   std::tuple<Vectors&...> scratch)
+    {
+        staticChecks<KeyVec, VectorX, Vectors...>(scratch);
+        checkSizesEqual(x.size(), keys, x, y, z, q, gidx, sfcOrder);
+        LocalIndex numParticles = x.size();
+        bufDesc_ = {0, numParticles, numParticles};
+        lowMemReallocate(numParticles, allocGrowthRate_, {}, scratch);
+
+        // Don't forget you need to have valid keys here
+
+        sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
+        std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
+        sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratch),
+                          get<1>(scratch), allocGrowthRate_);
+
+        // reorder particles to SFC order
+        gatherArrays({sfcOrder.data(), nParticles()}, 0, std::tie(x, y, z, q, gidx), scratch);
+
+        // compute node counts of the global tree
+        if constexpr (useGpu)
+        {
+            computeNodeCountsGpu(globalLeavesAcc_.data(), globalLeafCountsAcc_.data(), nNodes(globalLeavesAcc_),
+                                 {keyView.data(), keyView.size()}, std::numeric_limits<unsigned>::max(), false);
+        }
+        else
+        {
+            computeNodeCounts(globalLeavesAcc_.data(), globalLeafCountsAcc_.data(), nNodes(globalLeavesAcc_),
+                              {keyView.data(), keyView.size()}, std::numeric_limits<unsigned>::max(), false);
+        }
+        // assumes all ranks have the same number of global nodes (otherwise would have to use allgatherv)
+        mpiAllgatherGpuDirect<useGpu>((unsigned*)MPI_IN_PLACE, globalLeafCountsAcc_.data(),
+                                      assignment_.numNodesPerRank()[myRank_], comm_);
+
+        // compute LET counts
+        focusTree_.updateCounts(keyView, {globalLeavesAcc_.data(), globalLeavesAcc_.size()},
+                                {globalLeafCountsAcc_.data(), globalLeafCountsAcc_.size()}, std::get<0>(scratch));
+
+        focusTree_.pruneTreelets();
+
+        fill<useGpu>(layoutAcc_.begin(), layoutAcc_.end(), 0);
+        auto leafCounts    = focusTree_.leafCountsAcc();
+        auto letLocalRange = focusTree_.assignment()[myRank_];
+
+        exclusiveScan<useGpu>(leafCounts.data() + letLocalRange.start(), leafCounts.data() + letLocalRange.end(),
+                              layoutAcc_.data() + letLocalRange.start(), LocalIndex(0));
+        fill<useGpu>(layoutAcc_.begin() + letLocalRange.end(), layoutAcc_.end(), numParticles);
+
+        if constexpr (useGpu) { memcpyD2H(layoutAcc_.data(), layoutAcc_.size(), layout_.data()); }
+    }
+
     /*! @brief Call on DD steps.
      *
      *        Preconditions: - keys,x,y,z,q must have equal size. sfcOrder will be resized

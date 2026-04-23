@@ -509,7 +509,7 @@ void testFixedBoundaries(bool withHalos)
     Box<Real> box(0, 1);
     LocalIndex numParticles = 1000 * numRanks;
     float theta             = 1.0;
-    int maxLevel            = 3;
+    int maxLevel            = 5;
 
     std::vector<int> rankToSegment(numRanks);
     std::iota(rankToSegment.begin(), rankToSegment.end(), 0);
@@ -570,7 +570,7 @@ void testFixedBoundaries(bool withHalos)
     else
     {
         domain.computeKeys(keys, x, y, z);
-        domain.sync(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2));
+        domain.syncPrune(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2));
     }
 
     std::vector<KeyType> testKeys(x.size());

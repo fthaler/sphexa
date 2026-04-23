@@ -331,15 +331,14 @@ public:
     void pruneTreelets()
     {
         std::vector<std::vector<TreeNodeIndex>> prunedTreelets(numRanks_);
-        // internal side
+        // interior side
         auto treelets = treeletIdx_.cview();
-        for (int r = 0; r < numRanks_; ++r)
+        for (int peer : interiorPeers_)
         {
-            if (r == myRank_) { continue; }
-            for (int i = 0; i < treelets[r].size(); ++i)
+            for (int i = 0; i < treelets[peer].size(); ++i)
             {
-                int iidx = treelets[r][i];
-                if (countsAcc_[iidx]) { prunedTreelets[r].push_back(iidx); }
+                int iidx = treelets[peer][i];
+                if (countsAcc_[iidx]) { prunedTreelets[peer].push_back(iidx); }
             }
         }
         {
@@ -349,21 +348,20 @@ public:
             treeletIdxPruned_.reindex(std::move(sizes));
             auto tlview = treeletIdxPruned_.view();
 
-            for (int r = 0; r < numRanks_; ++r)
-                std::copy(prunedTreelets[r].begin(), prunedTreelets[r].end(), tlview[r].begin());
+            for (int peer : interiorPeers_)
+                std::copy(prunedTreelets[peer].begin(), prunedTreelets[peer].end(), tlview[peer].begin());
         }
 
-        // external side
+        // exterior side
         std::vector<std::vector<TreeNodeIndex>> prunedCsToInternal(numRanks_);
-        for (int r = 0; r < numRanks_; ++r)
+        for (int peer : exteriorPeers_)
         {
-            if (r == myRank_) { continue; }
             std::span<const TreeNodeIndex> mapToInternal =
-                leafToInternal(octreeAcc_).subspan(assignment_[r].start(), assignment_[r].count());
+                leafToInternal(octreeAcc_).subspan(assignment_[peer].start(), assignment_[peer].count());
             for (int i = 0; i < mapToInternal.size(); ++i)
             {
                 int intIdx = mapToInternal[i];
-                if (countsAcc_[intIdx]) { prunedCsToInternal[r].push_back(intIdx); }
+                if (countsAcc_[intIdx]) { prunedCsToInternal[peer].push_back(intIdx); }
             }
         }
         {
@@ -373,8 +371,8 @@ public:
             csToInternalPruned_.reindex(std::move(sizes));
             auto tlview = csToInternalPruned_.view();
 
-            for (int r = 0; r < numRanks_; ++r)
-                std::copy(prunedCsToInternal[r].begin(), prunedCsToInternal[r].end(), tlview[r].begin());
+            for (int peer : exteriorPeers_)
+                std::copy(prunedCsToInternal[peer].begin(), prunedCsToInternal[peer].end(), tlview[peer].begin());
         }
     }
 

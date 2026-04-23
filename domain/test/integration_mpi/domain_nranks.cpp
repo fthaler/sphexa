@@ -591,6 +591,8 @@ void testFixedBoundaries(bool withHalos)
     auto ftree     = domain.focusTree();
     auto ftreeView = ftree.octreeViewAcc();
 
+    ftree.createPersistentRequests<unsigned>();
+
     std::vector<unsigned> counts(ftreeView.numNodes);
     scatter<TreeNodeIndex>(ftreeView.leafToInternalSpan(), ftree.leafCountsAcc().data(), counts.data());
     upsweep(ftreeView.levelRangeSpan(), ftreeView.childOffsets, counts.data(), NodeCount<unsigned>{});

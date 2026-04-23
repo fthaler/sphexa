@@ -300,9 +300,9 @@ public:
         {
             auto csToInt            = leafToInternal(octreeAcc_);
             constexpr int typeIndex = util::FindIndex<T, PersistentExchangeTypes>{};
-            std::get<typeIndex>(persistentReqs_).setup(interiorPeers_, exteriorPeers_, treeletIdxAcc_.cview(),
-                                                       assignment_, csToInt,
-                                                       static_cast<int>(P2pTags::focusPeerCenters) + typeIndex, comm_);
+            std::get<typeIndex>(persistentReqs_)
+                .setup(interiorPeers_, exteriorPeers_, treeletIdxPruned_.cview(), csToInternalPruned_.cview(),
+                       assignment_, static_cast<int>(P2pTags::focusPeerCenters) + typeIndex, comm_);
         }
     }
 
@@ -335,6 +335,7 @@ public:
         auto treelets = treeletIdx_.cview();
         for (int r = 0; r < numRanks_; ++r)
         {
+            if (r == myRank_) { continue; }
             for (int i = 0; i < treelets[r].size(); ++i)
             {
                 int iidx = treelets[r][i];
@@ -373,7 +374,7 @@ public:
             auto tlview = csToInternalPruned_.view();
 
             for (int r = 0; r < numRanks_; ++r)
-                std::copy(prunedTreelets[r].begin(), prunedTreelets[r].end(), tlview[r].begin());
+                std::copy(prunedCsToInternal[r].begin(), prunedCsToInternal[r].end(), tlview[r].begin());
         }
     }
 

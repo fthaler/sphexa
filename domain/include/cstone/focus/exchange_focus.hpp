@@ -340,7 +340,7 @@ public:
      *
      * @param interiorPeers    ranks that have local cells in their LET (we send to these)
      * @param exteriorPeers    ranks with non-local cells in our LET (we receive from these)
-     * @param treeletIdx       per-rank index arrays mapping treelet nodes to local internal nodes
+     * @param sendGatherMaps       per-rank index arrays mapping treelet nodes to local internal nodes
      * @param focusAssignment  assignment ranges [start, end) per rank in the local focused tree
      * @param csToInternalMap  mapping from cornerstone leaf index to internal tree node index
      * @param commTag          MPI tag baked into the persistent requests
@@ -348,17 +348,23 @@ public:
      */
     void setup(std::span<const int> interiorPeers,
                std::span<const int> exteriorPeers,
-               std::vector<std::span<const TreeNodeIndex>> treeletIdx,
+               std::vector<std::span<const TreeNodeIndex>> sendGatherMaps,
                std::span<const IndexPair<TreeNodeIndex>> focusAssignment,
                std::span<const TreeNodeIndex> csToInternalMap,
                int commTag,
                MPI_Comm comm)
     {
+        recvScatterMaps_.resize(sendGatherMaps.size());
+        for (int peer : exteriorPeers)
+        {
+            recvScatterMaps_[peer] =
+                csToInternalMap.subspan(focusAssignment[peer].start(), focusAssignment[peer].count());
+        }
+
         interiorPeers_.assign(interiorPeers.begin(), interiorPeers.end());
         exteriorPeers_.assign(exteriorPeers.begin(), exteriorPeers.end());
-        treeletIdx_ = std::move(treeletIdx);
+        sendGatherMaps_ = std::move(sendGatherMaps);
         focusAssignment_  = focusAssignment;
-        csToInternalMap_  = csToInternalMap;
         commTag_          = commTag;
         comm_             = comm;
 
@@ -369,7 +375,7 @@ public:
 
         std::vector<std::size_t> sendSizes(interiorPeers.size());
         for (size_t i = 0; i < interiorPeers.size(); ++i)
-            sendSizes[i] = treeletIdx_[interiorPeers[i]].size();
+            sendSizes[i] = sendGatherMaps_[interiorPeers[i]].size();
 
         std::vector<std::size_t> recvSizes(exteriorPeers.size());
         for (size_t i = 0; i < exteriorPeers.size(); ++i)
@@ -402,9 +408,9 @@ public:
     //! @brief peer lists, buffer spans, and comm metadata for use in exchangeTreeletGeneral
     std::vector<int>                                interiorPeers_;
     std::vector<int>                                exteriorPeers_;
-    std::vector<std::span<const TreeNodeIndex>>     treeletIdx_;
+    std::vector<std::span<const TreeNodeIndex>>     sendGatherMaps_;
+    std::vector<std::span<const TreeNodeIndex>>     recvScatterMaps_;
     std::span<const IndexPair<TreeNodeIndex>>       focusAssignment_;
-    std::span<const TreeNodeIndex>                  csToInternalMap_;
     int                                             commTag_{-1};
     MPI_Comm                                        comm_{MPI_COMM_NULL};
 
@@ -433,7 +439,7 @@ void exchangeTreeletGeneral(std::span<T> quantities, TreeletRequests<T, BufVec>&
     for (size_t i = 0; i < requests.interiorPeers_.size(); ++i)
     {
         int peer = requests.interiorPeers_[i];
-        gatherAcc<useGpu, TreeNodeIndex>(requests.treeletIdx_[peer], quantities.data(), requests.sendSpans_[i].data());
+        gatherAcc<useGpu>(requests.sendGatherMaps_[peer], quantities.data(), requests.sendSpans_[i].data());
     }
     if constexpr (useGpu) { syncGpu(); }
 
@@ -449,10 +455,8 @@ void exchangeTreeletGeneral(std::span<T> quantities, TreeletRequests<T, BufVec>&
 
     for (size_t i = 0; i < requests.exteriorPeers_.size(); ++i)
     {
-        int peer           = requests.exteriorPeers_[i];
-        auto mapToInternal = requests.csToInternalMap_.subspan(requests.focusAssignment_[peer].start(),
-                                                               requests.recvSpans_[i].size());
-        scatterAcc<useGpu>(mapToInternal, requests.recvSpans_[i].data(), quantities.data());
+        int peer = requests.exteriorPeers_[i];
+        scatterAcc<useGpu>(requests.recvScatterMaps_[peer], requests.recvSpans_[i].data(), quantities.data());
     }
     if constexpr (useGpu) { syncGpu(); }
 }

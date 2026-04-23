@@ -330,6 +330,12 @@ public:
 
     void pruneTreelets()
     {
+        //ConcatVector<TreeNodeIndex, std::vector, sizeof(TreeNodeIndex)> compactFlags;
+        //std::vector<size_t> sizes(treeletIdx_.sizes().begin(), treeletIdx_.sizes().end());
+        //auto cmpFlagsView = compactFlags.reindex(std::move(sizes));
+
+        std::vector<unsigned> counts = toHost(countsAcc_);
+
         std::vector<std::vector<TreeNodeIndex>> prunedTreelets(numRanks_);
         // interior side
         auto treelets = treeletIdx_.cview();
@@ -338,7 +344,7 @@ public:
             for (int i = 0; i < treelets[peer].size(); ++i)
             {
                 int iidx = treelets[peer][i];
-                if (countsAcc_[iidx]) { prunedTreelets[peer].push_back(iidx); }
+                if (counts[iidx]) { prunedTreelets[peer].push_back(iidx); }
             }
         }
         {
@@ -361,7 +367,7 @@ public:
             for (int i = 0; i < mapToInternal.size(); ++i)
             {
                 int intIdx = mapToInternal[i];
-                if (countsAcc_[intIdx]) { prunedCsToInternal[peer].push_back(intIdx); }
+                if (counts[intIdx]) { prunedCsToInternal[peer].push_back(intIdx); }
             }
         }
         {

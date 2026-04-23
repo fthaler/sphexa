@@ -432,6 +432,8 @@ TEST(DomainGpu, fixedBoundaries)
     const auto& ftree = domain.focusTree();
     auto ftreeView    = ftree.octreeViewAcc();
 
+    domain.createPersistentTypeRequests<unsigned>();
+
     auto upsweepCnt = [](auto levelRange, auto childOffsets, auto Q)
     { upsweepSumGpu(maxTreeLevel<KeyType>{}, levelRange.data(), childOffsets, Q); };
 

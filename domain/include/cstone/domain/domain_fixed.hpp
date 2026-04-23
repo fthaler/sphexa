@@ -54,6 +54,9 @@ public:
     {
     }
 
+    template<class Q>
+    void createPersistentTypeRequests() { focusTree_.template createPersistentRequests<Q>(); }
+
     void createPersistentMultipoleRequests(int p) { focusTree_.createPersistentMultipoleRequests(p); }
 
     /*! @brief set the SFC domain decomposition boundaries and update the LET structure

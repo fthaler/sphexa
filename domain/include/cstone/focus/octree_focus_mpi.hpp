@@ -337,7 +337,8 @@ public:
         {
             for (int i = 0; i < treelets[r].size(); ++i)
             {
-                if (countsAcc_[i]) { prunedTreelets[r].push_back(i); }
+                int iidx = treelets[r][i];
+                if (countsAcc_[iidx]) { prunedTreelets[r].push_back(iidx); }
             }
         }
         {
@@ -987,7 +988,7 @@ private:
     ConcatVector<TreeNodeIndex> treeletIdx_;
     ConcatVector<TreeNodeIndex, AccVector> treeletIdxAcc_;
 
-    //! @brief same as treeletIdx_, but with empty
+    //! @brief same as treeletIdx_, but without empty cells
     ConcatVector<TreeNodeIndex> treeletIdxPruned_;
     ConcatVector<TreeNodeIndex> csToInternalPruned_;
 

@@ -333,19 +333,6 @@ public:
     TreeletRequests(TreeletRequests&&)            = default;
     TreeletRequests& operator=(TreeletRequests&&) = default;
 
-    /*! @brief Set up persistent MPI requests for repeated property exchanges with the same tree topology.
-     *
-     * Call once after the tree structure changes (e.g. at the end of FocusedOctree::updateTree).
-     * Allocates send/recv buffers, stores peer metadata, and calls MPI_Send_init / MPI_Recv_init.
-     *
-     * @param interiorPeers    ranks that have local cells in their LET (we send to these)
-     * @param exteriorPeers    ranks with non-local cells in our LET (we receive from these)
-     * @param sendGatherMaps       per-rank index arrays mapping treelet nodes to local internal nodes
-     * @param focusAssignment  assignment ranges [start, end) per rank in the local focused tree
-     * @param csToInternalMap  mapping from cornerstone leaf index to internal tree node index
-     * @param commTag          MPI tag baked into the persistent requests
-     * @param comm             MPI communicator
-     */
     void setup(std::span<const int> interiorPeers,
                std::span<const int> exteriorPeers,
                std::vector<std::span<const TreeNodeIndex>> sendGatherMaps,
@@ -354,19 +341,43 @@ public:
                int commTag,
                MPI_Comm comm)
     {
-        recvScatterMaps_.resize(sendGatherMaps.size());
+        std::vector<std::span<const TreeNodeIndex>> recvScatterMaps(sendGatherMaps.size());
         for (int peer : exteriorPeers)
         {
-            recvScatterMaps_[peer] =
+            recvScatterMaps[peer] =
                 csToInternalMap.subspan(focusAssignment[peer].start(), focusAssignment[peer].count());
         }
+        setup(interiorPeers, exteriorPeers, sendGatherMaps, std::move(recvScatterMaps), focusAssignment, commTag, comm);
+    }
 
+    /*! @brief Set up persistent MPI requests for repeated property exchanges with the same tree topology.
+     *
+     * Call once after the tree structure changes (e.g. at the end of FocusedOctree::updateTree).
+     * Allocates send/recv buffers, stores peer metadata, and calls MPI_Send_init / MPI_Recv_init.
+     *
+     * @param interiorPeers    ranks that have local cells in their LET (we send to these)
+     * @param exteriorPeers    ranks with non-local cells in our LET (we receive from these)
+     * @param sendGatherMaps   per-rank index arrays mapping treelet nodes to local internal nodes
+     * @param recvScatterMaps  mapping from cornerstone leaf index to internal tree node index
+     * @param focusAssignment  assignment ranges [start, end) per rank in the local focused tree
+     * @param commTag          MPI tag baked into the persistent requests
+     * @param comm             MPI communicator
+     */
+    void setup(std::span<const int> interiorPeers,
+               std::span<const int> exteriorPeers,
+               std::vector<std::span<const TreeNodeIndex>> sendGatherMaps,
+               std::vector<std::span<const TreeNodeIndex>> recvScatterMaps,
+               std::span<const IndexPair<TreeNodeIndex>> focusAssignment,
+               int commTag,
+               MPI_Comm comm)
+    {
         interiorPeers_.assign(interiorPeers.begin(), interiorPeers.end());
         exteriorPeers_.assign(exteriorPeers.begin(), exteriorPeers.end());
-        sendGatherMaps_ = std::move(sendGatherMaps);
-        focusAssignment_  = focusAssignment;
-        commTag_          = commTag;
-        comm_             = comm;
+        sendGatherMaps_  = std::move(sendGatherMaps);
+        recvScatterMaps_ = std::move(recvScatterMaps);
+        focusAssignment_ = focusAssignment;
+        commTag_         = commTag;
+        comm_            = comm;
 
         for (auto& r : sendRequests_)
             if (r != MPI_REQUEST_NULL) { MPI_Request_free(&r); }

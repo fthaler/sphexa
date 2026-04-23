@@ -301,7 +301,7 @@ public:
             auto csToInt            = leafToInternal(octreeAcc_);
             constexpr int typeIndex = util::FindIndex<T, PersistentExchangeTypes>{};
             std::get<typeIndex>(persistentReqs_)
-                .setup(interiorPeers_, exteriorPeers_, treeletIdxPruned_.cview(), csToInternalPruned_.cview(),
+                .setup(interiorPeers_, exteriorPeers_, treeletIdxPrunedAcc_.cview(), csToInternalPrunedAcc_.cview(),
                        assignment_, static_cast<int>(P2pTags::focusPeerCenters) + typeIndex, comm_);
         }
     }
@@ -334,7 +334,10 @@ public:
         //std::vector<size_t> sizes(treeletIdx_.sizes().begin(), treeletIdx_.sizes().end());
         //auto cmpFlagsView = compactFlags.reindex(std::move(sizes));
 
-        std::vector<unsigned> counts = toHost(countsAcc_);
+        // download from device until we implement this function on GPU
+        std::vector<unsigned> counts             = toHost(countsAcc_);
+        std::vector<TreeNodeIndex> leafToIntBuf_ = toHost(octreeAcc_.leafToInternal);
+        std::span leafToInt{leafToIntBuf_.data() + octreeAcc_.numInternalNodes, std::size_t(octreeAcc_.numLeafNodes)};
 
         std::vector<std::vector<TreeNodeIndex>> prunedTreelets(numRanks_);
         // interior side
@@ -362,8 +365,7 @@ public:
         std::vector<std::vector<TreeNodeIndex>> prunedCsToInternal(numRanks_);
         for (int peer : exteriorPeers_)
         {
-            std::span<const TreeNodeIndex> mapToInternal =
-                leafToInternal(octreeAcc_).subspan(assignment_[peer].start(), assignment_[peer].count());
+            auto mapToInternal = leafToInt.subspan(assignment_[peer].start(), assignment_[peer].count());
             for (int i = 0; i < mapToInternal.size(); ++i)
             {
                 int intIdx = mapToInternal[i];
@@ -380,6 +382,9 @@ public:
             for (int peer : exteriorPeers_)
                 std::copy(prunedCsToInternal[peer].begin(), prunedCsToInternal[peer].end(), tlview[peer].begin());
         }
+
+        copy(treeletIdxPruned_, treeletIdxPrunedAcc_);
+        copy(csToInternalPruned_, csToInternalPrunedAcc_);
     }
 
     /*! @brief transfer quantities of leaf cells inside the focus into a global array
@@ -996,6 +1001,8 @@ private:
     //! @brief same as treeletIdx_, but without empty cells
     ConcatVector<TreeNodeIndex> treeletIdxPruned_;
     ConcatVector<TreeNodeIndex> csToInternalPruned_;
+    ConcatVector<TreeNodeIndex, AccVector> treeletIdxPrunedAcc_;
+    ConcatVector<TreeNodeIndex, AccVector> csToInternalPrunedAcc_;
 
     //! Buffers for persistent MPI comm. Here for now, but should probably moved else where in a proper implementation
     template<class Q>

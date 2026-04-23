@@ -427,7 +427,8 @@ TEST(DomainGpu, fixedBoundaries)
     DeviceVector<KeyType> d_keys(x.size());
     DeviceVector<LocalIndex> sfcOrder(x.size());
 
-    domain.syncWithHalos(d_keys, d_x, d_y, d_z, d_q, d_gidx, sfcOrder, std::tie(s1, s2));
+    domain.computeKeys(d_keys, d_x, d_y, d_z);
+    domain.syncPrune(d_keys, d_x, d_y, d_z, d_q, d_gidx, sfcOrder, std::tie(s1, s2));
 
     const auto& ftree = domain.focusTree();
     auto ftreeView    = ftree.octreeViewAcc();

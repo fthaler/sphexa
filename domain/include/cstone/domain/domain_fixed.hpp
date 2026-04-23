@@ -238,6 +238,7 @@ public:
                               {keyView.data(), keyView.size()}, std::numeric_limits<unsigned>::max(), false);
         }
         // assumes all ranks have the same number of global nodes (otherwise would have to use allgatherv)
+        if constexpr (useGpu) { syncGpu(); }
         mpiAllgatherGpuDirect<useGpu>((unsigned*)MPI_IN_PLACE, globalLeafCountsAcc_.data(),
                                       assignment_.numNodesPerRank()[myRank_], comm_);
 
@@ -302,6 +303,7 @@ public:
                               {keyView.data(), keyView.size()}, std::numeric_limits<unsigned>::max(), false);
         }
         // assumes all ranks have the same number of global nodes (otherwise would have to use allgatherv)
+        if constexpr (useGpu) { syncGpu(); }
         mpiAllgatherGpuDirect<useGpu>((unsigned*)MPI_IN_PLACE, globalLeafCountsAcc_.data(),
                                       assignment_.numNodesPerRank()[myRank_], comm_);
 

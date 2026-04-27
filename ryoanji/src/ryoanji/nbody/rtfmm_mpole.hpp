@@ -37,7 +37,7 @@ namespace ryoanji
  * @tparam T    the multipole moment type, float or double
  * @tparam S    number of elements per multipole
  */
-template<class Tc, class T, unsigned S>
+template<class Tc, class T, std::size_t S>
 struct GlobalData
 {
     /*! @brief We want to align buffers to this size so we can load with float4 or double4_a16
@@ -57,19 +57,19 @@ struct GlobalData
 
     static constexpr unsigned T4_a_elem = T4_alignment / sizeof(T);
     //! @brief S padded to multiple of 16-byte size
-    static constexpr unsigned S_padded  = (S + T4_a_elem - 1) / T4_a_elem * T4_a_elem;
+    static constexpr std::size_t S_padded = (S + T4_a_elem - 1) / T4_a_elem * T4_a_elem;
 
-    Tc                      surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
-    T                       UT[S * S];
-    T                       vSinv[S * S];
-    T                       vSinvUT[S * S];
+    Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
+    T  UT[S * S];
+    T  vSinv[S * S];
+    T  vSinvUT[S * S];
     alignas(T4_alignment) T m2m[8][S * S_padded];
-    T                       r0;
+    T r0;
 };
 
 extern void* globalData;
 #ifdef __CUDACC__
-extern void* globalDataDevice_h;
+extern void*            globalDataDevice_h;
 extern __device__ void* globalDataDevice;
 #endif
 
@@ -78,7 +78,7 @@ HOST_DEVICE_FUN constexpr unsigned rtfmmSurfacePoints(unsigned p) { return 6u * 
 template<class T, std::size_t S>
 using RtfmmMultipole = util::array<T, S>;
 
-template<int stride, class T1, class T2, class T3, unsigned S>
+template<int stride, class T1, class T2, class T3, std::size_t S>
 HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
                              unsigned level, const Vec4<T1>& center, const Vec3<T1>& geoCenter,
                              RtfmmMultipole<T3, S>& gv)
@@ -117,7 +117,7 @@ HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m,
     }
 }
 
-template<class T, unsigned S>
+template<class T, std::size_t S>
 HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)
 {
 #ifdef __CUDA_ARCH__
@@ -145,7 +145,7 @@ HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)
     return gv;
 }
 
-template<int stride = 1, class T1, class T2, class T3, unsigned S>
+template<int stride = 1, class T1, class T2, class T3, std::size_t S>
 HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,
                          unsigned level, const Vec4<T1>& center, const Vec3<T1>& geoCenter, RtfmmMultipole<T3, S>& gv)
 {
@@ -154,7 +154,7 @@ HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, Loc
     gv = P2M_finalize<T3, S>(gv);
 }
 
-template<class Ta, class Tc, class Tmp, unsigned S>
+template<class Ta, class Tc, class Tmp, std::size_t S>
 HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target, const Vec3<Tc>& center,
                                            const RtfmmMultipole<Tmp, S>& multipole)
 {
@@ -162,7 +162,7 @@ HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target,
     return {};
 }
 
-template<class T, unsigned S, class Tc>
+template<class T, std::size_t S, class Tc>
 HOST_DEVICE_FUN void addMultipole(RtfmmMultipole<T, S>& composite, const Vec3<Tc>& dX, const Vec3<Tc>& geoDX,
                                   const RtfmmMultipole<T, S>& addend)
 {
@@ -184,7 +184,7 @@ HOST_DEVICE_FUN void addMultipole(RtfmmMultipole<T, S>& composite, const Vec3<Tc
     }
 }
 
-template<class T, unsigned S, class Tm>
+template<class T, std::size_t S, class Tm>
 HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc, const Vec3<T>& geoXout,
                          const Vec3<T>* geoXsrc, const RtfmmMultipole<Tm, S>* Msrc, RtfmmMultipole<Tm, S>& Mout)
 {
@@ -204,64 +204,14 @@ HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>*
     }
 }
 
-#define INSTANTIATE_RTFMM_MULTIPOLE(S)                                                                                 \
-    template<int stride, class T1, class T2, class T3>                                                                 \
-    HOST_DEVICE_FUN void P2M_add(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end, \
-                                 unsigned level, const Vec4<T1>& center, const Vec3<T1>& geoCenter,                    \
-                                 RtfmmMultipole<T3, S>& gv)                                                            \
-    {                                                                                                                  \
-        return P2M_add<stride, T1, T2, T3, S>(x, y, z, m, begin, end, level, center, geoCenter, gv);                   \
-    }                                                                                                                  \
-    template<class T>                                                                                                  \
-    HOST_DEVICE_FUN RtfmmMultipole<T, S> P2M_finalize(RtfmmMultipole<T, S> gv)                                         \
-    {                                                                                                                  \
-        return P2M_finalize<T, S>(gv);                                                                                 \
-    }                                                                                                                  \
-    template<int stride = 1, class T1, class T2, class T3>                                                             \
-    HOST_DEVICE_FUN void P2M(const T1* x, const T1* y, const T1* z, const T2* m, LocalIndex begin, LocalIndex end,     \
-                             unsigned level, const Vec4<T1>& center, const Vec3<T1>& geoCenter,                        \
-                             RtfmmMultipole<T3, S>& gv)                                                                \
-    {                                                                                                                  \
-        return P2M<stride, T1, T2, T3, S>(x, y, z, m, begin, end, level, center, geoCenter, gv);                       \
-    }                                                                                                                  \
-    template<class Ta, class Tc, class Tmp>                                                                            \
-    HOST_DEVICE_FUN DEVICE_INLINE Vec4<Ta> M2P(Vec4<Ta> acc, const Vec3<Tc>& target, const Vec3<Tc>& center,           \
-                                               const RtfmmMultipole<Tmp, S>& multipole)                                \
-    {                                                                                                                  \
-        return M2P<Ta, Tc, Tmp, S>(acc, target, center, multipole);                                                    \
-    }                                                                                                                  \
-    template<class T, class Tc>                                                                                        \
-    HOST_DEVICE_FUN void addQuadrupole(RtfmmMultipole<T, S>& composite, const Vec3<Tc>& dX, const Vec3<Tc>& geoDX,     \
-                                       const RtfmmMultipole<T, S>& addend)                                             \
-    {                                                                                                                  \
-        return addQuadrupole<T, S, Tc>(composite, dX, geoDX, addend);                                                  \
-    }                                                                                                                  \
-    template<class T, class Tm>                                                                                        \
-    HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>* Xsrc, const Vec3<T>& geoXout,     \
-                             const Vec3<T>* geoXsrc, const RtfmmMultipole<Tm, S>* Msrc, RtfmmMultipole<Tm, S>& Mout)   \
-    {                                                                                                                  \
-        M2M<T, S, Tm>(begin, end, Xout, Xsrc, geoXout, geoXsrc, Msrc, Mout);                                           \
-    }
 
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(2))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(3))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(4))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(5))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(6))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(7))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(8))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(9))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(10))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(11))
-INSTANTIATE_RTFMM_MULTIPOLE(rtfmmSurfacePoints(12))
-
-template<class Tc, class T, unsigned P>
+template<class Tc, class T, std::size_t P>
 void rtfmmInit(Tc r0);
 
 void rtfmmFinalize();
 
 #ifdef __CUDACC__
-template<unsigned S, class T1, class T2, class KeyType>
+template<std::size_t S, class T1, class T2, class KeyType>
 __global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* q, const TreeNodeIndex* leafToInternal,
                                const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout,
                                const cstone::Vec3<T1>* geoCenters, T2* qEquivAllDevice)
@@ -311,7 +261,7 @@ inline void checkCublas(cublasStatus_t status)
 }
 
 //! @brief compute multipoles for the leaves @p leaves[0:numLeaves], not @p multipoles must be zeroed before!
-template<unsigned S, class T1, class T2, class KeyType, class Vector>
+template<std::size_t S, class T1, class T2, class KeyType, class Vector>
 void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNodeIndex* leafToInternal,
               const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
               RtfmmMultipole<T2, S>* multipoles, cublasHandle_t handle, Vector& scratchBuffer)
@@ -319,7 +269,7 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
     auto [m1, m2] = util::packAllocBuffer(scratchBuffer, util::TypeList<T2, T2>{}, {S * numLeaves, S * numLeaves}, 64);
 
     const int blockNum  = numLeaves;
-    const int blockSize = std::min(S, 1024u);
+    const int blockSize = std::min(int(S), 1024);
 
     // TODO: CUDA stream
     rtfmmP2mKernel<S>
@@ -345,7 +295,7 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
                        multipoles);
 }
 
-template<unsigned ThreadsPerRow, unsigned RowsPerBlock, unsigned S, class T1, class T2>
+template<unsigned ThreadsPerRow, unsigned RowsPerBlock, std::size_t S, class T1, class T2>
 __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastParent, const TreeNodeIndex* childOffsets,
                                const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
 {
@@ -378,7 +328,7 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
         for (int c = 0; c < 8; ++c)
         {
             using T2_4 = GlobalData<T1, T2, S>::T4;
-            T2_4 a = *reinterpret_cast<T2_4*>(&m2m[c][row * data->S_padded + k]);
+            T2_4 a     = *reinterpret_cast<T2_4*>(&m2m[c][row * data->S_padded + k]);
             T2_4 b;
             if constexpr ((sizeof(T2) * S) % GlobalData<T1, T2, S>::T4_alignment == 0)
             {
@@ -408,7 +358,7 @@ __global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastPare
     if (threadIdx.x == 0) multipoles[parent][row] = accum;
 }
 
-template<unsigned S, class T1, class T2>
+template<std::size_t S, class T1, class T2>
 void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* childOffsets,
               const TreeNodeIndex numNodes, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
 {

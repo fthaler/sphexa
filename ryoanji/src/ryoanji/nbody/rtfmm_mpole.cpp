@@ -17,7 +17,7 @@ namespace ryoanji
 
 void* globalData;
 #ifdef __CUDACC__
-void* globalDataDevice_h;
+void*            globalDataDevice_h;
 __device__ void* globalDataDevice;
 #endif
 
@@ -71,7 +71,7 @@ std::vector<cstone::Vec3<T>> getSurfacePoints(unsigned p, T r = 1, cstone::Vec3<
     return points;
 }
 
-template<class Tc, class T, unsigned P, unsigned S = rtfmmSurfacePoints(P)>
+template<class Tc, class T, std::size_t P, std::size_t S = rtfmmSurfacePoints(P)>
 void initSurfacePoints(GlobalData<Tc, T, S>* globalData)
 {
     auto            surfacePoints = getSurfacePoints<Tc>(P);
@@ -228,7 +228,7 @@ cstone::Vec3<T> getChildCellX(const cstone::Vec3<T>& xPar, T rPar, int octant, b
     return x;
 }
 
-template<class Tc, class T, unsigned P, unsigned S = rtfmmSurfacePoints(P)>
+template<class Tc, class T, std::size_t P, std::size_t S = rtfmmSurfacePoints(P)>
 void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
 {
     /* P2M */
@@ -264,7 +264,7 @@ void initMatrices(GlobalData<Tc, T, S>* globalData, Tc r0)
     }
 }
 
-template<class Tc, class T, unsigned P>
+template<class Tc, class T, std::size_t P>
 void rtfmmInit(Tc r0)
 {
     constexpr auto S                  = rtfmmSurfacePoints(P);
@@ -282,8 +282,8 @@ void rtfmmInit(Tc r0)
 #endif
 }
 
-#define RTFMM_INIT(P) \
-    template void rtfmmInit<double, double, P>(double); \
+#define RTFMM_INIT(P)                                                                                                  \
+    template void rtfmmInit<double, double, P>(double);                                                                \
     template void rtfmmInit<float, float, P>(float);
 
 RTFMM_INIT(2);

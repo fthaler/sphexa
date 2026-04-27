@@ -68,6 +68,7 @@ struct GlobalData
 
 extern void* globalData;
 #ifdef __CUDACC__
+extern void* globalDataDevice_h;
 extern __device__ void* globalDataDevice;
 #endif
 
@@ -324,8 +325,7 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
     rtfmmP2mKernel<S>
         <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, qEquivAllDevice);
 
-    GlobalData<T1, T2, S>* data;
-    checkGpuErrors(cudaMemcpyFromSymbol(&data, globalDataDevice, sizeof(void*)));
+    auto data = reinterpret_cast<GlobalData<T1, T2, S>*>(globalDataDevice_h);
 
     T2   alpha = 1;
     T2   beta  = 0;

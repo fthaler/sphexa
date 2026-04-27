@@ -17,6 +17,7 @@ namespace ryoanji
 
 void* globalData;
 #ifdef __CUDACC__
+void* globalDataDevice_h;
 __device__ void* globalDataDevice;
 #endif
 
@@ -275,10 +276,9 @@ void rtfmmInit(Tc r0)
     initMatrices<Tc, T, P>(globalDataT, r0);
 
 #ifdef __CUDACC__
-    void* devicePtr;
-    checkGpuErrors(cudaMalloc(&devicePtr, sizeof(GlobalData<Tc, T, S>)));
-    checkGpuErrors(cudaMemcpy(devicePtr, globalData, sizeof(GlobalData<Tc, T, S>), cudaMemcpyHostToDevice));
-    checkGpuErrors(cudaMemcpyToSymbol(globalDataDevice, &devicePtr, sizeof(void*)));
+    checkGpuErrors(cudaMalloc(&globalDataDevice_h, sizeof(GlobalData<Tc, T, S>)));
+    checkGpuErrors(cudaMemcpy(globalDataDevice_h, globalData, sizeof(GlobalData<Tc, T, S>), cudaMemcpyHostToDevice));
+    checkGpuErrors(cudaMemcpyToSymbol(globalDataDevice, &globalDataDevice_h, sizeof(void*)));
 #endif
 }
 

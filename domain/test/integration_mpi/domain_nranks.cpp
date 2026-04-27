@@ -537,44 +537,54 @@ void testFixedBoundaries(bool withHalos)
     auto lastAssignedIndex =
         findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaryRankEnd[rank]);
 
-    std::vector<Real> x(coords.x().begin() + firstAssignedIndex, coords.x().begin() + lastAssignedIndex);
-    std::vector<Real> y(coords.y().begin() + firstAssignedIndex, coords.y().begin() + lastAssignedIndex);
-    std::vector<Real> z(coords.z().begin() + firstAssignedIndex, coords.z().begin() + lastAssignedIndex);
-    std::vector<Real> q(x.size(), 1.0 / x.size());
-    std::vector<int> gidx(x.size());
-
-    auto shuffle = [](auto& x, auto& y, auto& z, auto& q)
+    std::vector<Vec3<Real>> xyz(lastAssignedIndex - firstAssignedIndex);
+    std::vector q(xyz.size(), 1.0 / xyz.size());
     {
-        std::vector<LocalIndex> permutation(x.size());
-        std::iota(begin(permutation), end(permutation), LocalIndex(0));
-        std::mt19937 gen(0);
-        std::ranges::shuffle(permutation, gen);
+        std::vector x(coords.x().begin() + firstAssignedIndex, coords.x().begin() + lastAssignedIndex);
+        std::vector y(coords.y().begin() + firstAssignedIndex, coords.y().begin() + lastAssignedIndex);
+        std::vector z(coords.z().begin() + firstAssignedIndex, coords.z().begin() + lastAssignedIndex);
 
-        auto temp = x;
-        gatherArrays(permutation, 0, std::tie(x, y, z, q), std::tie(temp));
-    };
-    shuffle(x, y, z, q);
+        auto shuffle = [](auto& x, auto& y, auto& z, auto& q)
+        {
+            std::vector<LocalIndex> permutation(x.size());
+            std::iota(begin(permutation), end(permutation), LocalIndex(0));
+            std::mt19937 gen(0);
+            std::ranges::shuffle(permutation, gen);
 
-    std::vector<Real> s1, s2;
+            auto temp = x;
+            gatherArrays(permutation, 0, std::tie(x, y, z, q), std::tie(temp));
+        };
+        shuffle(x, y, z, q);
+
+        for (std::size_t i = 0; i < x.size(); ++i)
+        {
+            xyz[i] = {x[i], y[i], z[i]};
+        }
+    }
+    std::vector<int> gidx(xyz.size());
+
+    std::vector<Vec3<Real>> s1;
+    std::vector<Real> s2;
 
     DomainFixed<KeyType, Real> domain;
     domain.setBoundaries(boundaryRankStart, box, maxLevel, theta, comm, s1);
 
-    std::vector<KeyType> keys(x.size());
-    std::vector<LocalIndex> sfcOrder(x.size());
+    std::vector<KeyType> keys(xyz.size());
+    std::vector<LocalIndex> sfcOrder(xyz.size());
     if (withHalos)
     {
-        domain.syncWithHalos(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2));
-        domain.exchangeHalos(std::tie(x, y, z, q), s1, s2);
+        domain.syncWithHalos(keys, xyz, q, gidx, sfcOrder, std::tie(s1, s2));
+        domain.exchangeHalos(std::tie(xyz, q), s1, s2);
     }
     else
     {
-        domain.computeKeys(keys, x, y, z);
-        domain.sync(keys, x, y, z, q, gidx, sfcOrder, std::tie(s1, s2));
+        domain.computeKeys(keys, xyz);
+        domain.sync(keys, xyz, q, gidx, sfcOrder, std::tie(s1, s2));
     }
 
-    std::vector<KeyType> testKeys(x.size());
-    computeSfcKeys(x.data(), y.data(), z.data(), sfcKindPointer(testKeys.data()), x.size(), box);
+    IBox ibox(0, maxCoord<KeyType>{});
+    std::vector<KeyType> testKeys(xyz.size());
+    computeSfcKeysClamp(xyz.data(), sfcKindPointer(testKeys.data()), xyz.size(), box, ibox);
 
     auto o = domain.octreePropertiesHost();
     for (int i = 0; i < o.numLeafNodes; ++i)
@@ -582,7 +592,7 @@ void testFixedBoundaries(bool withHalos)
         int iidx = domain.focusTree().octreeViewAcc().leafToInternalSpan()[i];
         for (int p = o.layout[i]; p < o.layout[i + 1]; ++p)
         {
-            EXPECT_EQ(norm2(minDistance({x[p], y[p], z[p]}, o.centers[iidx], o.sizes[iidx])), 0.0);
+            EXPECT_EQ(norm2(minDistance({xyz[p]}, o.centers[iidx], o.sizes[iidx])), 0.0);
             EXPECT_GE(testKeys[p], o.leaves[i]);
             EXPECT_LT(testKeys[p], o.leaves[i + 1]);
         }

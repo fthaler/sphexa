@@ -62,35 +62,33 @@ computeSfcKeysGpu(const double*, const double*, const double*, HilbertKey<uint64
 
 template<class KeyType, class T>
 __global__ void
-computeSfcKeysClampKernel(KeyType* keys, const T* x, const T* y, const T* z, size_t numKeys, const Box<T> box,
-                          const IBox lbox)
+computeSfcKeysClampKernel(KeyType* keys, const Vec3<T>* xyz, size_t numKeys, const Box<T> box, const IBox lbox)
 {
     size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < numKeys)
     {
         KeyType rmKey = removeKey<KeyType>{};
-        if (keys[tid] != rmKey) { keys[tid] = sfc3D<KeyType>(x[tid], y[tid], z[tid], box, lbox); }
+        if (keys[tid] != rmKey) { keys[tid] = sfc3D<KeyType>(xyz[tid][0], xyz[tid][1], xyz[tid][2], box, lbox); }
     }
 }
 
 template<class KeyType, class T>
-void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, const Box<T>& box,
-                            const IBox& lbox)
+void computeSfcKeysClampGpu(const Vec3<T>* xyz, KeyType* keys, size_t numKeys, const Box<T>& box, const IBox& lbox)
 {
     if (numKeys == 0) { return; }
 
     constexpr int threadsPerBlock = 256;
-    computeSfcKeysClampKernel<<<iceil(numKeys, threadsPerBlock), threadsPerBlock>>>(keys, x, y, z, numKeys, box, lbox);
+    computeSfcKeysClampKernel<<<iceil(numKeys, threadsPerBlock), threadsPerBlock>>>(keys, xyz, numKeys, box, lbox);
     checkGpuErrors(cudaGetLastError());
 }
 
-#define COMPUTE_SFC_KEYS_CLAMP_GPU(T, KeyType) \
-template void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, \
-                                     const Box<T>& box, const IBox& lbox)
-COMPUTE_SFC_KEYS_CLAMP_GPU(float,  MortonKey<uint32_t>);
+#define COMPUTE_SFC_KEYS_CLAMP_GPU(T, KeyType)                                                                         \
+    template void computeSfcKeysClampGpu(const Vec3<T>* xyz, KeyType* keys, size_t numKeys, const Box<T>& box,         \
+                                         const IBox& lbox)
+COMPUTE_SFC_KEYS_CLAMP_GPU(float, MortonKey<uint32_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(double, MortonKey<uint32_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(double, MortonKey<uint64_t>);
-COMPUTE_SFC_KEYS_CLAMP_GPU(float,  HilbertKey<uint32_t>);
+COMPUTE_SFC_KEYS_CLAMP_GPU(float, HilbertKey<uint32_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(double, HilbertKey<uint32_t>);
 COMPUTE_SFC_KEYS_CLAMP_GPU(double, HilbertKey<uint64_t>);
 

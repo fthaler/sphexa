@@ -31,15 +31,14 @@ void computeSfcKeys(const T* x, const T* y, const T* z, KeyType* keys, size_t nu
 }
 
 template<class KeyType, class T>
-extern void computeSfcKeysClampGpu(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, const Box<T>& box,
-                                   const IBox& lbox);
+extern void
+computeSfcKeysClampGpu(const Vec3<T>* xyz, KeyType* keys, size_t numKeys, const Box<T>& box, const IBox& lbox);
 
 template<bool useGpu, class KeyType, class T>
-void computeSfcKeysClamp(const T* x, const T* y, const T* z, KeyType* keys, size_t numKeys, const Box<T>& box,
-                         const IBox& lbox)
+void computeSfcKeysClamp(const Vec3<T>* xyz, KeyType* keys, size_t numKeys, const Box<T>& box, const IBox& lbox)
 {
-    if constexpr (useGpu) { computeSfcKeysClampGpu(x, y, z, keys, numKeys, box, lbox); }
-    else { computeSfcKeysClamp(x, y, z, keys, numKeys, box, lbox); }
+    if constexpr (useGpu) { computeSfcKeysClampGpu(xyz, keys, numKeys, box, lbox); }
+    else { computeSfcKeysClamp(xyz, keys, numKeys, box, lbox); }
 }
 
 } // namespace cstone

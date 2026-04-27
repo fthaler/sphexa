@@ -142,10 +142,9 @@ public:
     //! @brief Compute particle SFC keys from particle coordinates, particles outside the local domain will be assigned
     //!        to the closest local cell
     template<class KeyVec, class VectorX>
-    void computeKeys(KeyVec& keys, VectorX& x, VectorX& y, VectorX& z)
+    void computeKeys(KeyVec& keys, VectorX& xyz)
     {
-        computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
-                                    localIBox_);
+        computeSfcKeysClamp<useGpu>(xyz.data(), sfcKindPointer(keys.data()), xyz.size(), box_, localIBox_);
     }
 
     /*! @brief Call on DD steps.
@@ -157,19 +156,17 @@ public:
      *              - LET local particle indexing, i.e. tree cell offsets and particle counts
      *        Does not do: - communication
      */
-    template<class KeyVec, class VectorX, class VectorI, class VectorJ, class... Vectors>
+    template<class KeyVec, class VectorX, class VectorQ, class VectorI, class VectorJ, class... Vectors>
     void sync(KeyVec& keys,
-              VectorX& x,
-              VectorX& y,
-              VectorX& z,
-              VectorX& q,
+              VectorX& xyz,
+              VectorQ& q,
               VectorI& gidx,
               VectorJ& sfcOrder,
               std::tuple<Vectors&...> scratchBuffers)
     {
         staticChecks<KeyVec, VectorX, Vectors...>(scratchBuffers);
-        checkSizesEqual(x.size(), keys, x, y, z, q, gidx, sfcOrder);
-        LocalIndex numParticles = x.size();
+        checkSizesEqual(xyz.size(), keys, xyz, q, gidx, sfcOrder);
+        LocalIndex numParticles = xyz.size();
         bufDesc_ = {0, numParticles, numParticles};
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratchBuffers);
 
@@ -181,7 +178,7 @@ public:
                           get<1>(scratchBuffers), allocGrowthRate_);
 
         // reorder particles to SFC order
-        gatherArrays({sfcOrder.data(), nParticles()}, 0, std::tie(x, y, z, q, gidx), scratchBuffers);
+        gatherArrays({sfcOrder.data(), nParticles()}, 0, std::tie(xyz, q, gidx), scratchBuffers);
 
         // compute local node particle counts and node particle layout
         focusTree_.computeLocalCounts(keyView);
@@ -205,25 +202,22 @@ public:
      *        Does: - Particle SFC sort
      *              - LET local particle indexing, i.e. tree cell offsets and particle counts
      */
-    template<class KeyVec, class VectorX, class VectorI, class VectorJ, class... Vectors>
+    template<class KeyVec, class VectorX, class VectorQ, class VectorI, class VectorJ, class... Vectors>
     void syncWithHalos(KeyVec& keys,
-                       VectorX& x,
-                       VectorX& y,
-                       VectorX& z,
-                       VectorX& q,
+                       VectorX& xyz,
+                       VectorQ& q,
                        VectorI& gidx,
                        VectorJ& sfcOrder,
                        std::tuple<Vectors&...> scratch)
     {
         staticChecks<KeyVec, VectorX, Vectors...>(scratch);
-        checkSizesEqual(x.size(), keys, x, y, z, q, gidx, sfcOrder);
-        LocalIndex numParticles = x.size();
+        checkSizesEqual(xyz.size(), keys, xyz, q, gidx, sfcOrder);
+        LocalIndex numParticles = xyz.size();
         bufDesc_                = {0, numParticles, numParticles};
         lowMemReallocate(numParticles, allocGrowthRate_, {}, scratch);
 
         // Compute and sort SFC keys
-        computeSfcKeysClamp<useGpu>(x.data(), y.data(), z.data(), sfcKindPointer(keys.data()), x.size(), box_,
-                                    localIBox_);
+        computeSfcKeysClamp<useGpu>(xyz.data(), sfcKindPointer(keys.data()), xyz.size(), box_, localIBox_);
         sequence<useGpu>(startIndex(), nParticles(), sfcOrder, allocGrowthRate_);
         std::span<KeyType> keyView(keys.data() + startIndex(), nParticles());
         sortByKey<useGpu>(keyView, std::span{sfcOrder.data() + startIndex(), nParticles()}, get<0>(scratch),
@@ -255,10 +249,10 @@ public:
         bufDesc_ = {layout_[myRange.start()], layout_[myRange.end()], layout_.back()};
 
         // We now know which cells have how many halos. Make space for them
-        lowMemReallocate(bufDesc_.size, allocGrowthRate_, std::tie(x, y, z, q, gidx), scratch);
+        lowMemReallocate(bufDesc_.size, allocGrowthRate_, std::tie(xyz, q, gidx), scratch);
 
         // reorder particles to SFC order and place them behind halos with lower SFC keys
-        gatherArrays({sfcOrder.data(), nParticles()}, bufDesc_.start, std::tie(x, y, z, q, gidx), scratch);
+        gatherArrays({sfcOrder.data(), nParticles()}, bufDesc_.start, std::tie(xyz, q, gidx), scratch);
 
         halos_.exchangeRequests(focusTree_.treeLeaves(), focusTree_.assignment(), layout_);
     }

@@ -355,7 +355,7 @@ void computeSfcKeys(const T* x, const T* y, const T* z, KeyType* particleKeys, s
 }
 
 template<class T, class KeyType>
-void computeSfcKeysClamp(const T* x, const T* y, const T* z, KeyType* particleKeys, size_t n, const Box<T>& box,
+void computeSfcKeysClamp(const Vec3<T>* xyz, KeyType* particleKeys, size_t n, const Box<T>& box,
                          const IBox& lbox)
 {
 #pragma omp parallel for schedule(static)
@@ -363,7 +363,7 @@ void computeSfcKeysClamp(const T* x, const T* y, const T* z, KeyType* particleKe
     {
         if (particleKeys[i] != removeKey<KeyType>::value)
         {
-            particleKeys[i] = sfc3D<KeyType>(x[i], y[i], z[i], box, lbox);
+            particleKeys[i] = sfc3D<KeyType>(xyz[i][0], xyz[i][1], xyz[i][2], box, lbox);
         }
     }
 }

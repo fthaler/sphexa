@@ -409,25 +409,32 @@ TEST(DomainGpu, fixedBoundaries)
     auto lastAssignedIndex =
         findNodeAbove(coords.particleKeys().data(), coords.particleKeys().size(), boundaryRankEnd[rank]);
 
-    std::vector<Real> x(coords.x().begin() + firstAssignedIndex, coords.x().begin() + lastAssignedIndex);
-    std::vector<Real> y(coords.y().begin() + firstAssignedIndex, coords.y().begin() + lastAssignedIndex);
-    std::vector<Real> z(coords.z().begin() + firstAssignedIndex, coords.z().begin() + lastAssignedIndex);
-    std::vector<Real> q(x.size(), 1.0 / x.size());
+    std::vector<Vec3<Real>> xyz(lastAssignedIndex - firstAssignedIndex);
+    {
+        std::vector x(coords.x().begin() + firstAssignedIndex, coords.x().begin() + lastAssignedIndex);
+        std::vector y(coords.y().begin() + firstAssignedIndex, coords.y().begin() + lastAssignedIndex);
+        std::vector z(coords.z().begin() + firstAssignedIndex, coords.z().begin() + lastAssignedIndex);
 
-    DeviceVector<Real> s1, s2;
+        for (std::size_t i = 0; i < x.size(); ++i)
+        {
+            xyz[i] = {x[i], y[i], z[i]};
+        }
+    }
+    std::vector<Real> q(xyz.size(), 1.0 / xyz.size());
+
+    DeviceVector<Vec3<Real>> s1;
+    DeviceVector<Real> s2;
 
     DomainFixed<KeyType, Real, GpuTag> domain;
     domain.setBoundaries(boundaryRankStart, box, maxLevel, theta, comm, s1);
 
-    DeviceVector<Real> d_x = x;
-    DeviceVector<Real> d_y = y;
-    DeviceVector<Real> d_z = z;
+    DeviceVector<Vec3<Real>> d_xyz = xyz;
     DeviceVector<Real> d_q = q;
-    DeviceVector<int> d_gidx(x.size());
-    DeviceVector<KeyType> d_keys(x.size());
-    DeviceVector<LocalIndex> sfcOrder(x.size());
+    DeviceVector<int> d_gidx(xyz.size());
+    DeviceVector<KeyType> d_keys(xyz.size());
+    DeviceVector<LocalIndex> sfcOrder(xyz.size());
 
-    domain.syncWithHalos(d_keys, d_x, d_y, d_z, d_q, d_gidx, sfcOrder, std::tie(s1, s2));
+    domain.syncWithHalos(d_keys, d_xyz, d_q, d_gidx, sfcOrder, std::tie(s1, s2));
 
     const auto& ftree = domain.focusTree();
     auto ftreeView    = ftree.octreeViewAcc();

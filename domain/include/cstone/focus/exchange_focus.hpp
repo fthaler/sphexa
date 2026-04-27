@@ -454,7 +454,6 @@ void exchangeTreeletGeneral(std::span<T> quantities, TreeletRequests<T, BufVec>&
                                                                requests.recvSpans_[i].size());
         scatterAcc<useGpu>(mapToInternal, requests.recvSpans_[i].data(), quantities.data());
     }
-    if constexpr (useGpu) { syncGpu(); }
 }
 
 //! @brief send cell properties, send to interior peers, recv from exterior peers

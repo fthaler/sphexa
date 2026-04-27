@@ -208,7 +208,6 @@ HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>*
     }
 }
 
-
 template<class Tc, class T, std::size_t P>
 void rtfmmInit(Tc r0);
 
@@ -300,11 +299,8 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
 }
 
 template<unsigned ThreadsPerRow, unsigned RowsPerBlock, std::size_t S, class T1, class T2>
-__device__ void rtfmmM2mBlock(TreeNodeIndex parent,
-                              unsigned row,
-                              const TreeNodeIndex* childOffsets,
-                              const Vec3<T1>* geoCenters,
-                              RtfmmMultipole<T2, S>* multipoles,
+__device__ void rtfmmM2mBlock(TreeNodeIndex parent, unsigned row, const TreeNodeIndex* childOffsets,
+                              const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles,
                               const GlobalData<T1, T2, S>* data)
 {
     const TreeNodeIndex firstChild = childOffsets[parent];
@@ -321,7 +317,7 @@ __device__ void rtfmmM2mBlock(TreeNodeIndex parent,
     }
 
     constexpr unsigned tileSize = 4 * ThreadsPerRow;
-    T2 accum = 0;
+    T2                 accum    = 0;
     for (unsigned k0 = 0; k0 + tileSize <= S; k0 += tileSize)
     {
         unsigned k = k0 + threadIdx.x * 4;
@@ -355,38 +351,33 @@ __device__ void rtfmmM2mBlock(TreeNodeIndex parent,
 
 #pragma unroll
     for (unsigned offset = ThreadsPerRow / 2; offset > 0; offset >>= 1)
-        accum += __shfl_down_sync(0xffffffffu, accum, offset, ThreadsPerRow);
+        accum += __shfl_down_sync(__activemask(), accum, offset, ThreadsPerRow);
 
     if (threadIdx.x == 0) multipoles[parent][row] = accum;
 }
 
 template<unsigned ThreadsPerRow, unsigned RowsPerBlock, std::size_t S, class T1, class T2>
-__global__ void rtfmmM2mKernel(TreeNodeIndex firstParent,
-                               TreeNodeIndex lastParent,
-                               const TreeNodeIndex* childOffsets,
-                               const Vec3<T1>* geoCenters,
-                               RtfmmMultipole<T2, S>* multipoles)
+__global__ void rtfmmM2mKernel(TreeNodeIndex firstParent, TreeNodeIndex lastParent, const TreeNodeIndex* childOffsets,
+                               const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
 {
     const TreeNodeIndex parent = blockIdx.z + firstParent;
     if (parent >= lastParent) return;
 
     const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
-    const unsigned                row  = blockIdx.x * RowsPerBlock + threadIdx.y;
+    const unsigned               row  = blockIdx.x * RowsPerBlock + threadIdx.y;
 
     rtfmmM2mBlock<ThreadsPerRow, RowsPerBlock, S>(parent, row, childOffsets, geoCenters, multipoles, data);
 }
 
 #if !defined(__HIPCC__)
 template<unsigned ThreadsPerRow, unsigned RowsPerBlock, std::size_t S, class T1, class T2>
-__global__ void rtfmmM2mCooperativeKernel(const TreeNodeIndex* levelRange,
-                                          int numLevels,
-                                          const TreeNodeIndex* childOffsets,
-                                          const Vec3<T1>* geoCenters,
+__global__ void rtfmmM2mCooperativeKernel(const TreeNodeIndex* levelRange, int numLevels,
+                                          const TreeNodeIndex* childOffsets, const Vec3<T1>* geoCenters,
                                           RtfmmMultipole<T2, S>* multipoles)
 {
-    const GlobalData<T1, T2, S>* data  = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
-    const unsigned                row  = blockIdx.x * RowsPerBlock + threadIdx.y;
-    auto                          grid = cooperative_groups::this_grid();
+    const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalDataDevice);
+    const unsigned               row  = blockIdx.x * RowsPerBlock + threadIdx.y;
+    auto                         grid = cooperative_groups::this_grid();
 
     for (int level = numLevels - 1; level > 0; --level)
     {
@@ -404,13 +395,10 @@ __global__ void rtfmmM2mCooperativeKernel(const TreeNodeIndex* levelRange,
 #endif
 
 template<std::size_t S, class T1, class T2>
-void rtfmmM2M(std::span<const TreeNodeIndex> levelRange,
-              const TreeNodeIndex* dLevelRange,
-              const TreeNodeIndex* childOffsets,
-              const Vec3<T1>* geoCenters,
-              RtfmmMultipole<T2, S>* multipoles)
+void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* dLevelRange,
+              const TreeNodeIndex* childOffsets, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
 {
-    const int numLevels = levelRange.size() - 1;
+    int numLevels = levelRange.size() - 1;
     if (numLevels <= 1) return;
 
     constexpr unsigned threadsPerRow = 8;
@@ -436,7 +424,7 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange,
     int activeBlocksPerSm = 0;
     checkGpuErrors(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
         &activeBlocksPerSm, rtfmmM2mCooperativeKernel<threadsPerRow, rowsPerBlock, S, T1, T2>,
-        threadsPerRow * rowsPerBlock, 0));
+        blockSize.x * blockSize.y * blockSize.z, 0));
 
     int multiprocessorCount = 0;
     checkGpuErrors(cudaDeviceGetAttribute(&multiprocessorCount, cudaDevAttrMultiProcessorCount, device));
@@ -450,19 +438,14 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange,
     unsigned parentWorkers = std::min<unsigned>(maxParents, maxResidentBlocks / rowTiles);
     if (!parentWorkers) { throw std::runtime_error("RTFMM M2M cooperative launch has no resident parent workers"); }
 
-    const dim3 numBlocks = {rowTiles, parentWorkers, 1};
-    int        numLevelsArg = numLevels;
-    auto       dLevelRangeArg = dLevelRange;
-    auto       childOffsetsArg = childOffsets;
-    auto       geoCentersArg   = geoCenters;
-    auto       multipolesArg   = multipoles;
-    void*      kernelArgs[]    = {reinterpret_cast<void*>(&dLevelRangeArg), reinterpret_cast<void*>(&numLevelsArg),
-                                  reinterpret_cast<void*>(&childOffsetsArg), reinterpret_cast<void*>(&geoCentersArg),
-                                  reinterpret_cast<void*>(&multipolesArg)};
+    const dim3 numBlocks    = {rowTiles, parentWorkers, 1};
+    void*      kernelArgs[] = {reinterpret_cast<void*>(&dLevelRange), reinterpret_cast<void*>(&numLevels),
+                               reinterpret_cast<void*>(&childOffsets), reinterpret_cast<void*>(&geoCenters),
+                               reinterpret_cast<void*>(&multipoles)};
 
     checkGpuErrors(cudaLaunchCooperativeKernel(
-        reinterpret_cast<void*>(rtfmmM2mCooperativeKernel<threadsPerRow, rowsPerBlock, S, T1, T2>), numBlocks, blockSize,
-        kernelArgs));
+        reinterpret_cast<void*>(rtfmmM2mCooperativeKernel<threadsPerRow, rowsPerBlock, S, T1, T2>), numBlocks,
+        blockSize, kernelArgs));
     checkGpuErrors(cudaGetLastError());
 #else
     for (int level = numLevels - 1; level > 0; --level)
@@ -473,8 +456,8 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange,
         if (!numParents) continue;
 
         const dim3 numBlocks = {rowTiles, 1, unsigned(numParents)};
-        rtfmmM2mKernel<threadsPerRow, rowsPerBlock, S><<<numBlocks, blockSize>>>(firstParent, lastParent, childOffsets,
-                                                                                  geoCenters, multipoles);
+        rtfmmM2mKernel<threadsPerRow, rowsPerBlock, S>
+            <<<numBlocks, blockSize>>>(firstParent, lastParent, childOffsets, geoCenters, multipoles);
     }
 #endif
 }

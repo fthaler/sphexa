@@ -26,6 +26,7 @@
 
 #include "kernel.hpp"
 #include "cstone/sfc/common.hpp"
+#include "cstone/util/pack_buffers.hpp"
 
 namespace ryoanji
 {
@@ -315,15 +316,14 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
               const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
               RtfmmMultipole<T2, S>* multipoles, cublasHandle_t handle, Vector& scratchBuffer)
 {
-    reallocateBytes(scratchBuffer, S * numLeaves * sizeof(T2), 1.1);
-    T2* qEquivAllDevice = reinterpret_cast<T2*>(scratchBuffer.data());
+    auto [m1, m2] = util::packAllocBuffer(scratchBuffer, util::TypeList<T2, T2>{}, {S * numLeaves, S * numLeaves}, 64);
 
     const int blockNum  = numLeaves;
     const int blockSize = std::min(S, 1024u);
 
     // TODO: CUDA stream
     rtfmmP2mKernel<S>
-        <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, qEquivAllDevice);
+        <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, m1.data());
 
     auto data = reinterpret_cast<GlobalData<T1, T2, S>*>(globalDataDevice_h);
 
@@ -336,14 +336,12 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
         else
             return cublasSgemm(std::forward<Args>(args)...);
     };
-    auto* mp_t2 = reinterpret_cast<T2*>(multipoles);
-    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->UT, S, qEquivAllDevice, S, &beta,
-                     mp_t2, S));
-    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, mp_t2, S, &beta,
-                     qEquivAllDevice, S));
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->UT, S, m1.data(), S, &beta,
+                     m2.data(), S));
+    checkCublas(gemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, S, numLeaves, S, &alpha, data->vSinv, S, m2.data(), S, &beta,
+                     m1.data(), S));
 
-    checkGpuErrors(cudaMemset(multipoles, 0, S * numLeaves * sizeof(T2)));
-    cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(qEquivAllDevice),
+    cstone::scatterGpu(leafToInternal, numLeaves, reinterpret_cast<const RtfmmMultipole<T2, S>*>(m1.data()),
                        multipoles);
 }
 

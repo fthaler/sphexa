@@ -383,13 +383,17 @@ __global__ void rtfmmM2mCooperativeKernel(const TreeNodeIndex* levelRange, int n
     {
         TreeNodeIndex firstParent = levelRange[level - 1];
         TreeNodeIndex lastParent  = levelRange[level];
+        TreeNodeIndex numParents  = lastParent - firstParent;
 
-        for (TreeNodeIndex parent = firstParent + blockIdx.y; parent < lastParent; parent += gridDim.y)
+        if (numParents)
         {
-            rtfmmM2mBlock<ThreadsPerRow, RowsPerBlock, S>(parent, row, childOffsets, geoCenters, multipoles, data);
-        }
+            for (TreeNodeIndex parent = firstParent + blockIdx.y; parent < lastParent; parent += gridDim.y)
+            {
+                rtfmmM2mBlock<ThreadsPerRow, RowsPerBlock, S>(parent, row, childOffsets, geoCenters, multipoles, data);
+            }
 
-        grid.sync();
+            if (level > 1) grid.sync();
+        }
     }
 }
 #endif

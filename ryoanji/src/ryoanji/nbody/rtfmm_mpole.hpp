@@ -401,8 +401,8 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* dL
     int numLevels = levelRange.size() - 1;
     if (numLevels <= 1) return;
 
-    constexpr unsigned threadsPerRow = 8;
-    constexpr unsigned rowsPerBlock  = 16;
+    constexpr unsigned threadsPerRow = 7;
+    constexpr unsigned rowsPerBlock  = 13;
     constexpr dim3     blockSize     = {threadsPerRow, rowsPerBlock, 1};
     constexpr unsigned rowTiles      = (S + rowsPerBlock - 1) / rowsPerBlock;
 

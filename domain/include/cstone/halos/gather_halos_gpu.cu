@@ -67,6 +67,8 @@ template void
 gatherRanges(const unsigned*, const unsigned*, int, const util::array<float, 3>*, util::array<float, 3>*, size_t);
 template void
 gatherRanges(const unsigned*, const unsigned*, int, const util::array<float, 4>*, util::array<float, 4>*, size_t);
+template void
+gatherRanges(const unsigned*, const unsigned*, int, const util::array<float, 6>*, util::array<float, 6>*, size_t);
 
 template void
 gatherRanges(const uint64_t*, const uint64_t*, int, const util::array<float, 1>*, util::array<float, 1>*, size_t);

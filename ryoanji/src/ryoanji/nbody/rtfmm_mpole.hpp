@@ -212,7 +212,7 @@ void rtfmmFinalize();
 
 #ifdef __CUDACC__
 template<std::size_t S, class T1, class T2, class KeyType>
-__global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* q, const TreeNodeIndex* leafToInternal,
+__global__ void rtfmmP2mKernel(const Vec3<T1>* xyz, const T2* q, const TreeNodeIndex* leafToInternal,
                                const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout,
                                const cstone::Vec3<T1>* geoCenters, T2* qEquivAllDevice)
 {
@@ -240,9 +240,9 @@ __global__ void rtfmmP2mKernel(const T1* x, const T1* y, const T1* z, const T2* 
         T2 p = 0.0f;
         for (int i = 0; i < count; i++)
         {
-            T1 xi = x[offset + i];
-            T1 yi = y[offset + i];
-            T1 zi = z[offset + i];
+            T1 xi = xyz[offset + i][0];
+            T1 yi = xyz[offset + i][1];
+            T1 zi = xyz[offset + i][2];
             T2 qi = q[offset + i];
 
             T1 dx = xj - xi;
@@ -262,7 +262,7 @@ inline void checkCublas(cublasStatus_t status)
 
 //! @brief compute multipoles for the leaves @p leaves[0:numLeaves], not @p multipoles must be zeroed before!
 template<std::size_t S, class T1, class T2, class KeyType, class Vector>
-void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNodeIndex* leafToInternal,
+void rtfmmP2M(const Vec3<T1>* xyz, const T2* m, const TreeNodeIndex* leafToInternal,
               const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
               RtfmmMultipole<T2, S>* multipoles, cublasHandle_t handle, Vector& scratchBuffer)
 {
@@ -273,7 +273,7 @@ void rtfmmP2M(const T1* x, const T1* y, const T1* z, const T2* m, const TreeNode
 
     // TODO: CUDA stream
     rtfmmP2mKernel<S>
-        <<<blockNum, blockSize>>>(x, y, z, m, leafToInternal, leaves, numLeaves, layout, geoCenters, m1.data());
+        <<<blockNum, blockSize>>>(xyz, m, leafToInternal, leaves, numLeaves, layout, geoCenters, m1.data());
 
     auto data = reinterpret_cast<GlobalData<T1, T2, S>*>(globalDataDevice_h);
 

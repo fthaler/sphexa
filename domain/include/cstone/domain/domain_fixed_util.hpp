@@ -60,7 +60,7 @@ void computeKeysFromCellAssignment(const Box<T>& globBox,
     reallocate(cellOffsets.back(), 1.5, keysOut);
     std::vector<KeyType> keys(keysOut.size());
 
-#pragma omp parallel schedule(static)
+#pragma omp parallel for schedule(static)
     for (int i = 0; i < numCells; ++i) // all GROMACS grid (leaf) cells in local domain
     {
         int czi = i % numCells_xyz[2];

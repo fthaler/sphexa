@@ -24,9 +24,12 @@
 
 #include <span>
 
+#include <cblas.h>
+
 #include "kernel.hpp"
 #include "cstone/sfc/common.hpp"
 #include "cstone/util/pack_buffers.hpp"
+#include "cstone/primitives/gather.hpp"
 
 namespace ryoanji
 {
@@ -40,6 +43,7 @@ namespace ryoanji
 template<class Tc, class T, std::size_t S>
 struct GlobalData
 {
+#ifdef __CUDACC__
     /*! @brief We want to align buffers to this size so we can load with float4 or double4_a16
      *
      * float 4 has to be 16-byte aligned, double4 is deprecated in favor of double4_a16 or double4_a32
@@ -58,6 +62,10 @@ struct GlobalData
     static constexpr unsigned T4_a_elem = T4_alignment / sizeof(T);
     //! @brief S padded to multiple of 16-byte size
     static constexpr std::size_t S_padded = (S + T4_a_elem - 1) / T4_a_elem * T4_a_elem;
+#else
+    static constexpr unsigned    T4_alignment = alignof(T);
+    static constexpr std::size_t S_padded     = S;
+#endif
 
     Tc surfacePointsX[S], surfacePointsY[S], surfacePointsZ[S];
     T  UT[S * S];
@@ -204,7 +212,6 @@ HOST_DEVICE_FUN void M2M(int begin, int end, const Vec4<T>& Xout, const Vec4<T>*
     }
 }
 
-
 template<class Tc, class T, std::size_t P>
 void rtfmmInit(Tc r0);
 
@@ -262,8 +269,8 @@ inline void checkCublas(cublasStatus_t status)
 
 //! @brief compute multipoles for the leaves @p leaves[0:numLeaves], not @p multipoles must be zeroed before!
 template<std::size_t S, class T1, class T2, class KeyType, class Vector>
-void rtfmmP2M(const Vec3<T1>* xyz, const T2* m, const TreeNodeIndex* leafToInternal,
-              const KeyType* leaves, TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
+void rtfmmP2M(const Vec3<T1>* xyz, const T2* m, const TreeNodeIndex* leafToInternal, const KeyType* leaves,
+              TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
               RtfmmMultipole<T2, S>* multipoles, cublasHandle_t handle, Vector& scratchBuffer)
 {
     auto [m1, m2] = util::packAllocBuffer(scratchBuffer, util::TypeList<T2, T2>{}, {S * numLeaves, S * numLeaves}, 64);
@@ -379,6 +386,109 @@ void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* ch
                 const dim3         numBlocks     = {(S + rowsPerBlock - 1) / rowsPerBlock, 1, numParents};
                 rtfmmM2mKernel<threadsPerRow, rowsPerBlock, S>
                     <<<numBlocks, blockSize>>>(firstParent, lastParent, childOffsets, geoCenters, multipoles);
+            }
+        }
+    }
+}
+#else
+
+template<std::size_t S, class T1, class T2, class KeyType, class Vector>
+void rtfmmP2M(const Vec3<T1>* xyz, const T2* q, const TreeNodeIndex* leafToInternal, const KeyType* leaves,
+              TreeNodeIndex numLeaves, const LocalIndex* layout, const Vec3<T1>* geoCenters,
+              RtfmmMultipole<T2, S>* multipoles, Vector& scratchBuffer)
+{
+    auto [m1, m2] = util::packAllocBuffer(scratchBuffer, util::TypeList<T2, T2>{}, {S * numLeaves, S * numLeaves}, 64);
+
+    const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalData);
+
+#pragma omp parallel for
+    for (unsigned bidx = 0; bidx < numLeaves; ++bidx)
+    {
+        const auto level       = cstone::treeLevel(leaves[bidx + 1] - leaves[bidx]);
+        const auto internalIdx = leafToInternal[bidx];
+        const T2   scale       = T2(1) / (1 << level);
+        const T2   scaleR      = T2(2.95) / (1 << level) * data->r0;
+        const auto center      = geoCenters[internalIdx];
+
+        const int offset = layout[bidx];
+        const int count  = layout[bidx + 1] - offset;
+
+        for (int j = 0; j < S; ++j)
+        {
+            T1 xj = data->surfacePointsX[j] * scaleR + center[0];
+            T1 yj = data->surfacePointsY[j] * scaleR + center[1];
+            T1 zj = data->surfacePointsZ[j] * scaleR + center[2];
+
+            T2 p = 0.0f;
+            for (int i = 0; i < count; i++)
+            {
+                T1 xi = xyz[offset + i][0];
+                T1 yi = xyz[offset + i][1];
+                T1 zi = xyz[offset + i][2];
+                T2 qi = q[offset + i];
+
+                T1 dx = xj - xi;
+                T1 dy = yj - yi;
+                T1 dz = zj - zi;
+                T2 r2 = dx * dx + dy * dy + dz * dz;
+                p += qi / std::sqrt(r2);
+            }
+            m1[bidx * S + j] = p * scale;
+        }
+    }
+
+    const auto gemm = []<class... Args>(Args&&... args)
+    {
+        if constexpr (std::is_same_v<T2, double>)
+            return cblas_dgemm(std::forward<Args>(args)...);
+        else
+            return cblas_sgemm(std::forward<Args>(args)...);
+    };
+    gemm(CblasRowMajor, CblasNoTrans, CblasTrans, numLeaves, S, S, 1, m1.data(), S, data->UT, S, 0, m2.data(), S);
+    gemm(CblasRowMajor, CblasNoTrans, CblasTrans, numLeaves, S, S, 1, m2.data(), S, data->vSinv, S, 0, m1.data(), S);
+
+    cstone::scatter(std::span<const TreeNodeIndex>{leafToInternal, std::size_t(numLeaves)},
+                    reinterpret_cast<const RtfmmMultipole<T2, S>*>(m1.data()), multipoles);
+}
+
+template<std::size_t S, class T1, class T2>
+void rtfmmM2M(std::span<const TreeNodeIndex> levelRange, const TreeNodeIndex* childOffsets,
+              const TreeNodeIndex numNodes, const Vec3<T1>* geoCenters, RtfmmMultipole<T2, S>* multipoles)
+{
+    const GlobalData<T1, T2, S>* data = reinterpret_cast<const GlobalData<T1, T2, S>*>(globalData);
+    const auto                   gemv = []<class... Args>(Args&&... args)
+    {
+        if constexpr (std::is_same_v<T2, double>)
+            return cblas_dgemv(std::forward<Args>(args)...);
+        else
+            return cblas_sgemv(std::forward<Args>(args)...);
+    };
+    const int numLevels = levelRange.size() - 1;
+    for (int level = numLevels - 1; level > 0; level--)
+    {
+        int batchCount = levelRange[level + 1] - levelRange[level];
+        if (batchCount)
+        {
+            const unsigned firstParent = levelRange[level - 1];
+            const unsigned lastParent  = levelRange[level];
+#pragma omp parallel for
+            for (unsigned parent = firstParent; parent < lastParent; ++parent)
+            {
+                const TreeNodeIndex firstChild = childOffsets[parent];
+                if (!firstChild) continue;
+
+                for (int c = 0; c < 8; ++c)
+                {
+                    const TreeNodeIndex child = firstChild + c;
+
+                    const auto     geoDX = geoCenters[parent] - geoCenters[child];
+                    const unsigned octant =
+                        unsigned(geoDX[2] < 0) | (unsigned(geoDX[1] < 0) << 1) | (unsigned(geoDX[0] < 0) << 2);
+                    const T2* m2m = data->m2m[octant];
+
+                    gemv(CblasRowMajor, CblasNoTrans, S, S, 1, m2m, S, (T2*)&multipoles[child], 1, c == 0 ? 0 : 1,
+                         (T2*)&multipoles[parent], 1);
+                }
             }
         }
     }

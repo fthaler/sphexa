@@ -19,7 +19,7 @@ criteria live in `overview.md` (shared invariants, dependency chain) and the
 
 | M | File | Scope | Depends on | Status | Gate |
 |---|---|---|---|---|---|
-| M0 | `milestone-0.md` | cstone primitives (stable partition, fluid layout, masked fill, uint8 gather, `gatherArrays` hardening) + tests | — | not-started | unit tests, debug+release (+CUDA) |
+| M0 | `milestone-0.md` | cstone primitives (stable partition, fluid layout, masked fill, uint8 gather, `gatherArrays` hardening) + tests | — | done | unit tests, debug+release (+CUDA) |
 | M1 | `milestone-1.md` | `ve-pt` skeleton, ptype end-to-end, partition→restore, CPU bitwise `ve` equivalence | M0 | not-started | CPU bitwise gate |
 | M2 | `milestone-2.md` | fluid SPH phase: `(ptype, m)` exchange, `fluidHalos_`, fluid tree view/groups/pipeline, saveFields rework, `--nonfluid-frac`, 2-rank tests | M1 | not-started | all-fluid bitwise + 2-rank mixed configs |
 | M2b | `milestone-2b.md` | SPH empty-range hardening (`rhoTimestep`, `minMax(Gpu)`, `reduceDt`) + zero-fluid-rank config | M2 | not-started | config (b), CPU + CUDA |
@@ -32,21 +32,21 @@ criteria live in `overview.md` (shared invariants, dependency chain) and the
 
 Implementation:
 
-- [ ] `stablePartition` — fused, both permutations, CPU (`primitives_acc.hpp`) + GPU (`primitives_gpu.h`/`.cu`); exclusive-scan-of-**non-fluid**-flag formula
-- [ ] Fluid-layout helper — segmented `ptype == 0` count over `domain.layout()` + exclusive scan; fills `fluidLayoutHost_` + `fluidLayoutAcc_`, realloc to `numLeafNodes + 1` per call
-- [ ] Masked zero-fill — CPU `fillMasked` next to `fill`; GPU kernel + explicit instantiation
-- [ ] `GATHER_RANGES(uint8_t, unsigned)` in `gather_halos_gpu.cu:60-74`
-- [ ] `gatherArrays` hardening — release-active `throw` on `array.size() < ordering.size()`, covering **both** `reorderArray` branches, strict `<`
-- [ ] CMake: no changes expected (all GPU code in existing `primitives_gpu.cu`)
+- [x] `stablePartition` — fused, both permutations, CPU (`primitives_acc.hpp`) + GPU (`primitives_gpu.h`/`.cu`); exclusive-scan-of-**non-fluid**-flag formula
+- [x] Fluid-layout helper — segmented `ptype == 0` count over `domain.layout()` + exclusive scan; fills `fluidLayoutHost_` + `fluidLayoutAcc_`, realloc to `numLeafNodes + 1` per call (`computeFluidLayout(exec, layout, ptype, acc, host, growthRate)` in `primitives_acc.hpp`/`primitives_gpu.h`, device count in `primitives_gpu.cu`)
+- [x] Masked zero-fill — CPU `fillMasked` next to `fill`; GPU kernel + explicit instantiation (float/double dest, uint8_t mask)
+- [x] `GATHER_RANGES(uint8_t, unsigned)` in `gather_halos_gpu.cu:60-74`
+- [x] `gatherArrays` hardening — release-active `throw` on `array.size() < ordering.size()`, covering **both** `reorderArray` branches, strict `<`
+- [x] CMake: no library changes (all GPU code stays in the existing `primitives_gpu.cu`); the three **test** CMakeLists were updated to register the new tests — deviation from plan item 6, required to build them
 
 Tests / acceptance:
 
-- [ ] `stablePartition` unit tests, CPU + GPU: all-fluid, all-non-fluid, single fluid, alternating; both outputs written ∀i; `orderingInv_[ordering_[j]] == j`; **stability**; gather puts fluid at `[0:nFluid)` in order
-- [ ] Fluid-layout brute force: zero-count leaves, `nFluid < bufSize` padding, all-fluid ⇒ `fluidLayout == layout`
-- [ ] `gatherArrays` hardening test: size-0 field + non-empty ordering **throws**, both branches, run in **debug AND release**; existing `Layout.gatherArrays` stays green + shorter-ordering positive case
-- [ ] Masked-fill unit test, CPU + GPU: masked written, unmasked sentinel intact, empty-range no-op
-- [ ] 2-rank MPI gtest syncing/exchanging a `uint8_t` field through domain `exchangeHalos` (links only with the new instantiation)
-- [ ] Domain unit-test suite green in debug + release; GPU tests under CUDA build
+- [x] `stablePartition` unit tests, CPU + GPU: all-fluid, all-non-fluid, single fluid, alternating; both outputs written ∀i; `orderingInv_[ordering_[j]] == j`; **stability**; gather puts fluid at `[0:nFluid)` in order
+- [x] Fluid-layout brute force: zero-count leaves, `nFluid < bufSize` padding, all-fluid ⇒ `fluidLayout == layout`
+- [x] `gatherArrays` hardening test: size-0 field + non-empty ordering **throws**, both branches, run in **debug AND release**; existing `Layout.gatherArrays` stays green + shorter-ordering positive case
+- [x] Masked-fill unit test, CPU + GPU: masked written, unmasked sentinel intact, empty-range no-op
+- [x] 2-rank MPI gtest syncing/exchanging a `uint8_t` field through domain `exchangeHalos` (links only with the new instantiation) — `integration_mpi/exchange_ptype.cpp`, CPU + GPU targets, 2 ranks green
+- [x] Domain unit-test suite green in debug + release; GPU tests under CUDA build — 339/339 CPU (debug+release, plain+OMP); `component_units_cuda` green (release+debug); 2-rank uint8 exchange green (CPU + GPU)
 
 ---
 
@@ -186,3 +186,8 @@ Acceptance:
 Append one line per work session: `- YYYY-MM-DD — <milestone> — what was done / gate outcome (build, ranks)`.
 
 - 2026-11-04 — — `progress.md` created from `overview.md` + milestone files; all milestones not-started.
+- 2026-11-04 — M0 — implemented all five primitives + tests (`primitives_acc.hpp`, `primitives_gpu.h/.cu`, `gather_halos_gpu.cu`, `layout.hpp`; new tests `unit/primitives/stable_partition.cpp`, `unit_cuda/primitives/stable_partition.cu`, `integration_mpi/exchange_ptype.cpp`). CPU suites green: 339/339 debug+release (plain + OMP). CUDA cstone builds (release+debug, standalone, `--extended-lambda` needed for standalone builds) compile clean. GPU + 2-rank MPI gate runs pending (no GPU/MPI in dev environment).
+- 2026-11-04 — M0 — fixed two issues found at the GPU/MPI gates: (1) host-side write to device memory in `computeFluidLayoutGpu` (last-element zero moved into `fluidLeafCountsKernel`); (2) exchange_ptype verification assumed buffer index == global index — the post-sync buffer is SFC-ordered (Hilbert ≠ listed order), now verifies per particle via unique x. **Gates green**: CPU 339/339 debug+release (plain+OMP); `component_units_cuda` release+debug; 2-rank `exchange_ptype` CPU + GPU (release+debug) + `exchange_halos`/`domain_2ranks` regression. M0 done.
+- 2026-11-04 — — M0 verified: standalone cstone builds `build-cstone-{debug,release}` (CPU) and `build-cstone-cuda{,-debug}` (CUDA, with `-DCMAKE_CUDA_FLAGS=--extended-lambda`).
+- 2026-11-04 — M0 — code-review fixes: `<cassert>` include in `primitives_acc.hpp`; shared test-verification header `unit/primitives/stable_partition_checks.hpp` (dedupes CPU/GPU checkers + random driver); GPU `stablePartition` tests now also run the spec'd gather check; `computeFluidLayout(Gpu)` turned into extern template + explicit instantiation (launch helper now file-local); deduped owned-range fill in `exchange_ptype.cpp`; comment wording aligned with CONTEXT.md; CMake checkbox corrected above.
+- 2026-11-04 — M0 — second code-review round: `stable_partition.cu` gather check now round-trips the ordering through a `DeviceVector<LocalIndex>` (device span into `gather` — fixes host-pointer-into-kernel spec defect); gather verification deduped into `stable_partition_checks.hpp` as `checkGatherResult` (host buffers, shared by CPU/GPU tests); unique-x global lookup deduped in `exchange_ptype.cpp` via file-local `globalIndex` helper; `extern` added to the `computeFluidLayout(Gpu)` declaration in `primitives_gpu.h`; `constexpr`→`const` for `thisExampleRanks` (matches `domain_2ranks.cpp`); SFC-comment typo fixed. Verified: full CPU unit suite 339/339 in `build-cstone-debug` and `build-cstone-release`; `component_units_cuda` compiles+links in `build-cstone-cuda` and `build-cstone-cuda-debug`; `exchange_ptype` (CPU debug+release) and `exchange_ptype_gpu` (CUDA release+debug) compile clean. CUDA/MPI compile-only this session (no GPU/mpirun available).

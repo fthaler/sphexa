@@ -9,6 +9,7 @@ set(UNIT_TEST_SOURCES_GPU
         primitives/concat_vector.cu
         primitives/gather.cu
         primitives/primitives_gpu.cu
+        primitives/stable_partition.cu
         primitives/warpscan.cu
         focus/inject.cu
         sfc/common.cu

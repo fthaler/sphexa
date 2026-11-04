@@ -33,6 +33,7 @@
 #pragma once
 
 #include <iostream>
+#include <stdexcept>
 #include <vector>
 
 #include "cstone/cuda/cuda_utils.hpp"
@@ -236,6 +237,10 @@ void gatherArrays(Exec exec,
 {
     auto reorderArray = [ordering, outputOffset, &scratchBuffers, exec](auto& array)
     {
+        if (array.size() < ordering.size())
+        {
+            throw std::runtime_error("gatherArrays: array size smaller than ordering size\n");
+        }
         using VectorRef  = decltype(array);
         using VectorType = std::decay_t<VectorRef>;
         if constexpr (util::Contains<VectorRef, std::tuple<Arrays2&...>>{})

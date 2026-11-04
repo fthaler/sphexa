@@ -14,6 +14,7 @@
  */
 
 #include <stdexcept>
+#include <vector>
 
 #include <thrust/binary_search.h>
 #include <thrust/count.h>
@@ -440,5 +441,115 @@ void selectCopy(execution::Gpu exec, const TS* src, LocalIndex n, const S* selec
 
 template void selectCopy(execution::Gpu, const int*, LocalIndex, const unsigned*, unsigned*);
 template void selectCopy(execution::Gpu, const unsigned*, LocalIndex, const unsigned*, unsigned*);
+
+template<class T, class M>
+__global__ void fillMaskedKernel(T* dest, size_t n, const M* mask, T value)
+{
+    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < n && mask[tid] != 0) { dest[tid] = value; }
+}
+
+template<class T, class M>
+void fillMasked(execution::Gpu exec, T* first, T* last, const M* mask, T value)
+{
+    size_t n       = last - first;
+    int numThreads = 256;
+    int numBlocks  = iceil(n, numThreads);
+    if (numBlocks == 0) { return; }
+    fillMaskedKernel<<<numBlocks, numThreads, 0, exec>>>(first, n, mask, value);
+}
+
+template void fillMasked(execution::Gpu, float*, float*, const uint8_t*, float);
+template void fillMasked(execution::Gpu, double*, double*, const uint8_t*, double);
+
+__global__ void nonFluidFlagsKernel(const uint8_t* ptype, LocalIndex n, unsigned* flags)
+{
+    LocalIndex tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < n) { flags[tid] = (ptype[tid] != 0); }
+}
+
+__global__ void stablePartitionKernel(const uint8_t* ptype,
+                                      LocalIndex n,
+                                      LocalIndex nFluid,
+                                      const unsigned* nonFluidScan,
+                                      LocalIndex* ordering,
+                                      LocalIndex* orderingInv)
+{
+    LocalIndex tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < n)
+    {
+        LocalIndex dest = (ptype[tid] == 0) ? tid - nonFluidScan[tid] : nFluid + nonFluidScan[tid];
+        ordering[dest]  = tid;
+        orderingInv[tid] = dest;
+    }
+}
+
+void stablePartition(execution::Gpu exec,
+                     const uint8_t* ptype,
+                     LocalIndex n,
+                     LocalIndex nFluid,
+                     LocalIndex* ordering,
+                     LocalIndex* orderingInv,
+                     unsigned* workspace)
+{
+    int numThreads = 256;
+    int numBlocks  = iceil(n, numThreads);
+    if (numBlocks == 0) { return; }
+
+    nonFluidFlagsKernel<<<numBlocks, numThreads, 0, exec>>>(ptype, n, workspace);
+    exclusiveScan(exec, workspace, workspace + n, workspace, unsigned(0));
+    stablePartitionKernel<<<numBlocks, numThreads, 0, exec>>>(ptype, n, nFluid, workspace, ordering, orderingInv);
+}
+
+__global__ void fluidLeafCountsKernel(const LocalIndex* layout, TreeNodeIndex numLeafNodes, const uint8_t* ptype,
+                                      unsigned* counts)
+{
+    TreeNodeIndex tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < numLeafNodes)
+    {
+        unsigned count = 0;
+        for (LocalIndex i = layout[tid]; i < layout[tid + 1]; ++i)
+        {
+            if (ptype[i] == 0) { ++count; }
+        }
+        counts[tid] = count;
+    }
+    else if (tid == numLeafNodes)
+    {
+        counts[numLeafNodes] = 0;
+    }
+}
+
+//! @brief computeFluidLayout for GPU buffers, see the CPU version in primitives_acc.hpp for the contract
+template<class AccVector, class HostVector>
+void computeFluidLayout(execution::Gpu exec,
+                        std::span<const LocalIndex> layout,
+                        const uint8_t* ptype,
+                        AccVector& fluidLayoutAcc,
+                        HostVector& fluidLayoutHost,
+                        double growthRate)
+{
+    TreeNodeIndex numLeafNodes = TreeNodeIndex(layout.size()) - 1;
+    assert(numLeafNodes >= 0);
+
+    reallocate(fluidLayoutHost, numLeafNodes + 1, growthRate);
+    reallocate(fluidLayoutAcc, numLeafNodes + 1, growthRate);
+
+    int numThreads = 256;
+    int numBlocks  = iceil(size_t(numLeafNodes) + 1, numThreads);
+    fluidLeafCountsKernel<<<numBlocks, numThreads, 0, exec>>>(layout.data(), numLeafNodes, ptype,
+                                                              rawPtr(fluidLayoutAcc));
+    exclusiveScan(exec, rawPtr(fluidLayoutAcc), rawPtr(fluidLayoutAcc) + numLeafNodes + 1, rawPtr(fluidLayoutAcc),
+                  unsigned(0));
+    memcpyD2HAsync(exec, rawPtr(fluidLayoutAcc), numLeafNodes + 1, fluidLayoutHost.data());
+    syncGpu(exec);
+}
+
+template void computeFluidLayout(execution::Gpu,
+                                 std::span<const LocalIndex>,
+                                 const uint8_t*,
+                                 DeviceVector<LocalIndex>&,
+                                 std::vector<LocalIndex>&,
+                                 double);
 
 } // namespace cstone

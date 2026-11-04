@@ -62,6 +62,7 @@ void gatherRanges(execution::Gpu exec,
                                int numRanges, const T* src, T* buffer, size_t bufferSize);
 
 GATHER_RANGES(int, unsigned)
+GATHER_RANGES(uint8_t, unsigned)
 
 using ArrayF1 = util::array<float, 1>;
 using ArrayF2 = util::array<float, 2>;

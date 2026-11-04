@@ -173,4 +173,36 @@ extern size_t count(execution::Gpu exec, const ValueType* first, const ValueType
 template<class TS, class TD, class S>
 extern void selectCopy(execution::Gpu exec, const TS* src, LocalIndex n, const S* selectFlags, TD* dest);
 
+/*! @brief fill @p value into [first:last) where the mask is non-zero, no-op for empty ranges
+ *
+ * @param mask  mask array aligned with [first:last), a value is written where mask[i] != 0
+ */
+template<class T, class M>
+extern void fillMasked(execution::Gpu exec, T* first, T* last, const M* mask, T value);
+
+/*! @brief stable partition of [0:n) into fluid (ptype == 0) and non-fluid (ptype != 0) elements
+ *
+ * Writes both permutations in one pass, see the CPU version in primitives_acc.hpp for the contract.
+ * @param workspace  scratch of length >= n, holds the exclusive scan of the non-fluid flags in between
+ */
+extern void stablePartition(execution::Gpu exec,
+                            const uint8_t* ptype,
+                            LocalIndex n,
+                            LocalIndex nFluid,
+                            LocalIndex* ordering,
+                            LocalIndex* orderingInv,
+                            unsigned* workspace);
+
+//! @brief computeFluidLayout for GPU buffers, see the CPU version in primitives_acc.hpp for the contract
+//!
+//! Instantiated in primitives_gpu.cu for DeviceVector + std::vector output buffers.
+template<class AccVector, class HostVector>
+extern void
+computeFluidLayout(execution::Gpu exec,
+                   std::span<const LocalIndex> layout,
+                   const uint8_t* ptype,
+                   AccVector& fluidLayoutAcc,
+                   HostVector& fluidLayoutHost,
+                   double growthRate);
+
 } // namespace cstone

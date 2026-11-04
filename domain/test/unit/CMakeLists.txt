@@ -11,6 +11,7 @@ set(UNIT_TESTS
         primitives/concat_vector.cpp
         primitives/gather.cpp
         primitives/math.cpp
+        primitives/stable_partition.cpp
         sfc/box.cpp
         sfc/common.cpp
         sfc/hilbert.cpp

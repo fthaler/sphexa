@@ -16,6 +16,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <span>
 
 #include "cstone/execution.hpp"
@@ -30,6 +31,17 @@ void fill(execution::Cpu, It first, It last, T value)
 {
     if (last <= first) { return; }
     std::fill(first, last, value);
+}
+
+//! @brief fill @p value into [first:last) where the mask is non-zero, no-op for empty ranges
+template<class It, class MaskIt, class T>
+void fillMasked(execution::Cpu, It first, It last, MaskIt maskFirst, T value)
+{
+    if (last <= first) { return; }
+    for (; first != last; ++first, ++maskFirst)
+    {
+        if (*maskFirst != 0) { *first = value; }
+    }
 }
 
 template<class T>
@@ -100,6 +112,85 @@ void sequence(execution::Cpu exec, LocalIndex first, LocalIndex n, BufferType& b
     reallocateBytes(buffer, sizeof(LocalIndex) * (first + n), growthRate);
     auto* seq = reinterpret_cast<LocalIndex*>(buffer.data());
     sequence(exec, seq + first, seq + first + n, first);
+}
+
+/*! @brief stable partition of [0:n) into fluid (ptype == 0) and non-fluid (ptype != 0) elements
+ *
+ * Writes both permutations of the partition in a single pass:
+ *   - @p ordering[j] is the source index of the j-th element in the partitioned order
+ *     (fluid elements compacted to [0:nFluid) in their original order, non-fluid elements
+ *     appended at [nFluid:n) in their original order)
+ *   - @p orderingInv[i] is the destination of element i, i.e. orderingInv[ordering[j]] == j
+ *
+ * @param[in]  ptype        element type flags, 0 = fluid, non-zero = non-fluid
+ * @param[in]  n            number of elements, including halos
+ * @param[in]  nFluid       number of fluid elements, i.e. the number of ptype == 0 elements in [0:n)
+ * @param[out] ordering     destination ordering, length n
+ * @param[out] orderingInv  inverse of @p ordering, length n
+ * @param[-]   workspace    scratch of length >= n, only used by the GPU path
+ */
+inline void stablePartition(execution::Cpu,
+                            const uint8_t* ptype,
+                            LocalIndex n,
+                            LocalIndex nFluid,
+                            LocalIndex* ordering,
+                            LocalIndex* orderingInv,
+                            unsigned* /*workspace*/)
+{
+    LocalIndex fluidCount = 0, nonFluidCount = 0;
+    for (LocalIndex i = 0; i < n; ++i)
+    {
+        if (ptype[i] == 0) { ordering[fluidCount++] = i; }
+        else { ordering[nFluid + nonFluidCount++] = i; }
+    }
+    assert(fluidCount == nFluid);
+
+    for (LocalIndex j = 0; j < n; ++j)
+    {
+        orderingInv[ordering[j]] = j;
+    }
+}
+
+/*! @brief compute the fluid particle offset of each focus-tree leaf
+ *
+ * Per-leaf count of elements with ptype == 0 over the leaf ranges [layout[i]:layout[i+1]) followed by
+ * an exclusive scan, such that fluidLayout[i] is the number of fluid particles in all leaves before leaf i
+ * and fluidLayout.back() is the total number of fluid particles in the buffer.
+ *
+ * @param[in]    exec             execution policy
+ * @param[in]    layout           particle offsets per leaf cell, length numLeafNodes + 1
+ * @param[in]    ptype            element type flags over the full particle buffer, 0 = fluid
+ * @param[out]   fluidLayoutAcc   leaf fluid offsets in the memory space of @p exec, reallocated to
+ *                                numLeafNodes + 1 on every call
+ * @param[out]   fluidLayoutHost  host copy of @p fluidLayoutAcc, reallocated to numLeafNodes + 1 on every call
+ * @param[in]    growthRate       buffer growth rate used for (re)allocation
+ */
+template<class AccVector, class HostVector>
+void computeFluidLayout(execution::Cpu,
+                        std::span<const LocalIndex> layout,
+                        const uint8_t* ptype,
+                        AccVector& fluidLayoutAcc,
+                        HostVector& fluidLayoutHost,
+                        double growthRate)
+{
+    TreeNodeIndex numLeafNodes = TreeNodeIndex(layout.size()) - 1;
+    assert(numLeafNodes >= 0);
+
+    reallocate(fluidLayoutHost, numLeafNodes + 1, growthRate);
+    reallocate(fluidLayoutAcc, numLeafNodes + 1, growthRate);
+
+    LocalIndex fluidCount = 0;
+    for (TreeNodeIndex i = 0; i < numLeafNodes; ++i)
+    {
+        fluidLayoutHost[i] = fluidCount;
+        for (LocalIndex j = layout[i]; j < layout[i + 1]; ++j)
+        {
+            if (ptype[j] == 0) { ++fluidCount; }
+        }
+    }
+    fluidLayoutHost[numLeafNodes] = fluidCount;
+
+    std::copy(fluidLayoutHost.begin(), fluidLayoutHost.end(), fluidLayoutAcc.begin());
 }
 
 } // namespace cstone

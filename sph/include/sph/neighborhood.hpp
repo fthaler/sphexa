@@ -31,7 +31,8 @@ struct NeighborhoodData
     void disableNeighborLists() { useNeighborLists = false; }
 
     template<class Dataset, class T>
-    void build(const cstone::GroupView& groups, Dataset& d, const cstone::Box<T>& box, bool /* subgroups */)
+    void build(const cstone::GroupView& groups, Dataset& d, const cstone::Box<T>& box, bool /* subgroups */,
+               cstone::LocalIndex totalBodies = 0)
     {
         neighborhood.emplace<0>();
 
@@ -44,10 +45,12 @@ struct NeighborhoodData
         else
             builder = cstone::ijloop::CpuAlwaysTraverseNeighborhoodBuilder{d.ngmax};
 
+        if (totalBodies == 0) { totalBodies = d.size(); }
+
         std::visit(
             [&](auto const& nb)
             {
-                neighborhood = nb.build(cstone::execution::cpu, d.treeView, box, d.size(), groups, d.x.data(),
+                neighborhood = nb.build(cstone::execution::cpu, d.treeView, box, totalBodies, groups, d.x.data(),
                                         d.y.data(), d.z.data(), d.h.data());
             },
             builder);

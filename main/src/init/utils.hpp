@@ -31,11 +31,14 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <span>
 #include <string>
 #include <vector>
 
+#include "cstone/cuda/cuda_utils.hpp"
 #include "cstone/primitives/gather.hpp"
 #include "cstone/primitives/primitives_acc.hpp"
 #include "cstone/primitives/mpi_wrappers.hpp"
@@ -89,7 +92,8 @@ void readTemplateBlock(const std::string& block, IFileReader* reader, Vector& x,
 }
 
 //! @brief read file attributes into an associative container
-void readFileAttributes(InitSettings& settings, const std::string& settingsFile, IFileReader* reader, bool verbose)
+inline void readFileAttributes(InitSettings& settings, const std::string& settingsFile, IFileReader* reader,
+                               bool verbose)
 {
     if (not settingsFile.empty())
     {
@@ -163,6 +167,76 @@ void initFieldsAtRest(Dataset& d, double m_part)
     cstone::fill(d.exec, d.temp.begin(), d.temp.end(), 0.0);
 
     generateParticleIDs(d.exec, d.id);
+}
+
+/*! @brief interim mixed-IC mechanism: mark a fraction of the particles non-fluid, fresh ICs only
+ *
+ * The selection is a function of the particle id only (rank-count independent): every stride-th
+ * global id is marked non-fluid, with stride = round(1/frac). The id % stride rule spreads the
+ * marked particles over the whole domain — unlike id < f*N, which for glass ICs (where id follows
+ * the global SFC order) would select one spatially contiguous corner chunk. The rule only realizes
+ * fractions of the form 1/stride: frac > 0.5 is rejected (stride would round to 1, marking every
+ * particle), and very small fractions may undershoot to zero marked particles.
+ *
+ * Fresh ICs only: ptype must be all-zero before marking (a ptype-bearing restart stores the mark
+ * already). GPU mechanics: generateParticleIDs is host-MPI code, so ids are copied D2H, the
+ * selection runs on the host and ptype is uploaded H2D — no kernels, no new .cu (host TU).
+ */
+template<class Dataset>
+void markNonFluidFraction(Dataset& d, double frac)
+{
+    if (frac < 0.0 || frac > 1.0) { throw std::runtime_error("nonfluid fraction must be in [0:1]\n"); }
+    if (frac == 0.0) { return; }
+    if (frac > 0.5)
+    {
+        throw std::runtime_error("nonfluid fraction > 0.5: the id % stride rule cannot realize it "
+                                 "(stride rounds to 1, i.e. every particle marked)\n");
+    }
+
+    size_t                localCount = d.id.size();
+    std::vector<uint64_t> idHost(localCount);
+    std::vector<uint8_t>  ptypeHost(localCount);
+    if constexpr (Dataset::useGpu)
+    {
+        cstone::memcpyD2HAsync(d.exec, cstone::rawPtr(d.id), localCount, idHost.data());
+        cstone::memcpyD2HAsync(d.exec, cstone::rawPtr(d.ptype), localCount, ptypeHost.data());
+        cstone::syncGpu(d.exec);
+    }
+    else
+    {
+        std::copy(d.id.begin(), d.id.end(), idHost.begin());
+        std::copy(d.ptype.begin(), d.ptype.end(), ptypeHost.begin());
+    }
+
+    if (std::any_of(ptypeHost.begin(), ptypeHost.end(), [](uint8_t p) { return p != 0; }))
+    {
+        throw std::runtime_error("markNonFluidFraction: ptype is not all-zero (fresh ICs only; "
+                                 "a ptype-bearing restart already stores the mark)\n");
+    }
+
+    uint64_t stride = 1.0 / frac + 0.5;
+    for (size_t i = 0; i < localCount; ++i)
+    {
+        if (idHost[i] % stride == 0) { ptypeHost[i] = 1; }
+    }
+
+    //! @brief the marked non-fluid h keeps its IC value (gravity softening) and feeds egrav and
+    //! accelerationTimestep — assert it stays finite/sane
+    if (localCount > 0)
+    {
+        auto [hMin, hMax] = cstone::minMax(d.exec, cstone::rawPtr(d.h), cstone::rawPtr(d.h) + localCount);
+        if (not std::isfinite(hMin) || not std::isfinite(hMax) || hMin <= 0)
+        {
+            throw std::runtime_error("markNonFluidFraction: IC smoothing lengths are not finite/positive\n");
+        }
+    }
+
+    if constexpr (Dataset::useGpu)
+    {
+        cstone::memcpyH2DAsync(d.exec, ptypeHost.data(), localCount, cstone::rawPtr(d.ptype));
+        cstone::syncGpu(d.exec);
+    }
+    else { std::copy(ptypeHost.begin(), ptypeHost.end(), d.ptype.begin()); }
 }
 
 //! @brief Used to read the default values of dataset attributes

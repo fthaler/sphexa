@@ -42,6 +42,7 @@
 #include "cstone/domain/domain.hpp"
 
 #include "init/factory.hpp"
+#include "init/utils.hpp"
 #include "io/arg_parser.hpp"
 #include "io/factory.hpp"
 #include "observables/factory.hpp"
@@ -111,6 +112,7 @@ int main(int argc, char** argv)
     std::string              outFile              = parser.get("-o", "dump_" + removeModifiers(initCond));
     std::string              profFile             = parser.get("-op", std::string("profile"));
     const bool               disableNeighborLists = parser.exists("--disable-neighbor-lists");
+    const double             nonFluidFrac         = parser.get("--nonfluid-frac", 0.0);
 
     std::ofstream nullOutput("/dev/null");
     std::ostream& output = (quiet || rank) ? nullOutput : std::cout;
@@ -137,6 +139,10 @@ int main(int argc, char** argv)
 
     auto& d = simData.hydro;
     simData.setOutputFields(outputFields.empty() ? propagator->conservedFields() : outputFields);
+
+    //! @brief interim mixed-IC mechanism (M2): mark a fraction of the ICs non-fluid (fresh ICs only),
+    //! before the first sync which stamps halo ptype and computes the fluid layout
+    if (nonFluidFrac > 0.0) { markNonFluidFraction(d, nonFluidFrac); }
 
     if (disableNeighborLists) d.disableNeighborLists();
 
@@ -303,5 +309,8 @@ void printHelp(char* name, int rank)
 
         printf("\t--disable-neighbor-lists \t Disable neighbor lists and instead always traverse the full octree\n\
                 \t for finding particle-particle interactions\n\n");
+
+        printf("\t--nonfluid-frac F \t Mark fraction F of the initial particles as non-fluid (gravity-only).\n\
+                \t Fresh ICs only, [0:0.5]. [default 0]\n\n");
     }
 }

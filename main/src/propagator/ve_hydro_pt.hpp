@@ -31,12 +31,21 @@
  * non-zero = gravity-only. Non-fluid particles keep their initial condition smoothing length
  * (gravity softening) and are integrated from gravity accelerations only.
  *
+ * The SPH phase runs on the fluid-compacted index space [fluidFirst:fluidLast) realized by the
+ * stable partition of the full SFC-ordered buffer; the full SFC layout is restored with the cached
+ * inverse permutation before gravity and output. The two index spaces are the largest bug source:
+ * exactly four layout transitions per step (computeForces steps 4/9, integrate steps 3/4), all via
+ * the partition_/unpartition_ helper pair.
+ *
  * @author Sebastian Keller <sebastian.f.keller@gmail.com>
  */
 
 #pragma once
 
 #include <algorithm>
+#include <cassert>
+#include <mpi.h>
+#include <optional>
 #include <span>
 
 #include "cstone/fields/field_get.hpp"
@@ -81,9 +90,30 @@ protected:
     GroupData<Acc> groups_;
 
     //! @brief cached stable-partition permutations of the particle buffer, see computeForces
+    //!
+    //! ordering_ stays valid between computeForces step 9 and integrate step 3 (no sync in between);
+    //! it is a per-step cache, rebuilt in the next computeForces step 4, never reused across a sync.
     AccVector<cstone::LocalIndex> ordering_, orderingInv_;
     //! @brief keys-sized scratch reused by the partition and by the gatherArrays applications of both permutations
     AccVector<uint64_t> partitionScratch_;
+
+    /*! @brief second halo exchange helper, operating on the fluid-compacted index space
+     *
+     * std::optional because Halos has no default constructor and the propagator is created before
+     * simData (and its communicator) exists; lazily constructed in the first sync().
+     */
+    std::optional<cstone::Halos<KeyType>> fluidHalos_;
+
+    //! @brief dedicated fluid-halo exchange scratch buffers, never aliased with keys/ax (invariant (d))
+    AccVector<uint64_t> fluidHaloSendScratch_, fluidHaloRecvScratch_;
+
+    //! @brief fluid-only leaf particle offsets, host-readable for exchangeRequests + accelerator
+    //! copy for the fluid tree view and the kernels (step 2/5)
+    std::vector<cstone::LocalIndex> fluidLayoutHost_;
+    AccVector<cstone::LocalIndex>   fluidLayoutAcc_;
+
+    //! @brief step-8 trigger flag (run-constant): divv/curlv/gradh are requested outputs
+    bool iadTrioRequested_{false};
 
     /*! @brief the list of conserved particles fields with values preserved between iterations
      *
@@ -150,6 +180,13 @@ public:
                         std::tuple_cat(std::tie(get<"m">(d)), get<ConservedFields>(d)), get<DependentFields>(d));
         }
         d.treeView = domain.octreeProperties();
+
+        //! @brief lazily construct the fluid halo helper on the first sync
+        //!
+        //! Halos builds everything inside exchangeRequests, so late construction is safe. Documented
+        //! assumption: simData.comm == the Domain's comm (both MPI_COMM_WORLD on every current path;
+        //! no accessor exists to assert it — a sub-comm Domain would deadlock here).
+        if (!fluidHalos_) { fluidHalos_.emplace(Base::rank_, simData.comm); }
     }
 
     void computeForces(DomainType& domain, DataType& simData) override
@@ -161,88 +198,160 @@ public:
         Base::logDomainStats(domain, simData);
 
         auto& d = simData.hydro;
-        d.resize(domain.nParticlesWithHalos());
-        size_t first = domain.startIndex();
-        size_t last  = domain.endIndex();
 
-        //! @brief step 4: stable partition of the full buffer [0:bufSize) into fluid and non-fluid particles
+        //! @brief step 8: output trio trigger, all-three-or-nothing, derived from the output selection
         //!
-        //! M1 placeholder: nFluid = d.size(), i.e. all particles are fluid, so the partition and its
-        //! inverse are the identity permutation and the round trip below must not perturb any value.
-        size_t bufSize = domain.nParticlesWithHalos();
-        size_t nFluid  = d.size();
-        ordering_.resize(bufSize);
-        orderingInv_.resize(bufSize);
-        partitionScratch_.resize(bufSize);
-        cstone::stablePartition(domain.exec(), cstone::rawPtr(d.ptype), bufSize, nFluid, cstone::rawPtr(ordering_), cstone::rawPtr(orderingInv_),
-                                reinterpret_cast<unsigned*>(cstone::rawPtr(partitionScratch_)));
+        //! Run-constant (setOutputFields runs once before the time-step loop; test the flag boolean,
+        //! not membership lookups). gradh is additionally consumed by the saveFields EOS recovery
+        //! pass, so the marking and the permanent allocation are trio-wide; requesting any one of
+        //! the three allocates all three. The trio stays out of DependentFields: its one halo
+        //! exchange (divv) uses the fluid pattern.
+        using HydroData = std::decay_t<decltype(d)>;
+        auto isOutput   = [&d](const char* name)
+        {
+            int fidx = int(cstone::getFieldIndex(name, HydroData::fieldNames));
+            return std::find(d.outputFieldIndices.begin(), d.outputFieldIndices.end(), fidx) !=
+                   d.outputFieldIndices.end();
+        };
+        iadTrioRequested_ = isOutput("divv") || isOutput("curlv") || isOutput("gradh");
+
+        //! @brief step 1: single marking site (step 8) — mark the IAD trio dependent iff requested
+        //!
+        //! Step-1 ordering invariant (load-bearing, not defensive): sync -> mark -> d.resize ->
+        //! (ptype, m) halo exchange -> fluid counts (step 2). Marking must precede d.resize, else
+        //! the trio stays zero-length through step 4's gatherArrays (OOB on GPU). The halo ptype of
+        //! the exchange must be fresh when step 2 counts it: a stale halo ptype yields a
+        //! peer-inconsistent fluidLayout, surfacing as an MPI size-mismatch hang in the fluid
+        //! exchanges, not a clean error.
+        //! Stale-content invariant: d.resize leaves grown non-conserved fields holding stale
+        //! contents — safe because nothing consumes the trio between the resize and the phase-7
+        //! IAD: step 4's flag-gated gather reads it value-agnostically, and the first readers
+        //! (rhoTimestep, computeEOS, the divv halo exchange) all run after the IAD.
+        if (iadTrioRequested_) { d.setDependent("divv", "curlv", "gradh"); }
+
+        d.resize(domain.nParticlesWithHalos());
+
+        //! @brief step 1 (contd): halo ptype + halo m on the focus-tree pattern set by the sync
+        //!
+        //! Halo m: sync delivers halos only for x,y,z,h, but computeXMass and gravity's upsweep
+        //! consume m over the whole buffer incl. halos. Replaces ve's homogeneous fillMassHalos
+        //! (dropped in step 6). Keys-as-receive-scratch safety: the GPU packed receive (scratch
+        //! keys) reaches into the owned range, but nothing reads keys before the next sync
+        //! recomputes them; the CPU path ignores the scratches.
+        domain.exchangeHalos(std::tie(d.ptype, d.m), get<"ax">(d), get<"keys">(d));
+
+        //! @brief step 2: fluid-only leaf counts + exclusive scan
+        //!
+        //! No communication: the whole-leaf halo delivery premise makes per-leaf fluid counts
+        //! peer-consistent. fluidLayout is indexed by focus-tree leaves in the fluid-compacted
+        //! index space: fluidLayout[i] is the number of fluid particles in all leaves before leaf i.
+        cstone::computeFluidLayout(domain.exec(), domain.layout(), cstone::rawPtr(d.ptype), fluidLayoutAcc_,
+                                   fluidLayoutHost_, d.getAllocGrowthRate());
+        size_t nFluid = fluidLayoutHost_.back();
+        timer.step("fluidLayout");
+
+        size_t fluidFirst = fluidLayoutHost_[domain.startCell()];
+        size_t fluidLast  = fluidLayoutHost_[domain.endCell()];
+
+        //! @brief step 3: fluid halo request exchange, in the fluid-compacted index space realized
+        //! by step 4's partition
+        //!
+        //! Invariants (load-bearing, violations hang or corrupt — the fencing is emergent from the
+        //! two Alltoalls plus the complete-on-return exchanges):
+        //! (a) no main-instance exchangeHalos/exchangeRequests from the step-3 Alltoall until the
+        //!     next sync's exchangeRequests Alltoall (covers the fluid exchanges and the dead zone
+        //!     after them);
+        //! (b) no fluid exchangeHalos after the step-7 exchanges until the next sync's
+        //!     exchangeRequests;
+        //! (c) fluidHalos_.exchangeRequests before its first exchangeHalos, as for the main
+        //!     instance;
+        //! (d) fluidHalos_ gets its own GPU scratch buffers (members above); ax/keys never aliased.
+        assert(fluidHalos_);
+        fluidHalos_->exchangeRequests(domain.focusTree().treeLeaves(), domain.focusTree().assignment(),
+                                      fluidLayoutHost_);
+        assertFluidHalosConsistent(simData, fluidFirst, fluidLast, nFluid);
+
+        //! @brief step 4: partition into the fluid-compacted layout
+        partition_(domain, simData, nFluid);
         timer.step("partition");
 
-        fillMassHalos(domain.exec(), get<"m">(d), first, last);
+        //! @brief step 5: fluid tree view — the focus tree with the layout pointer swapped to the
+        //! fluid layout
+        //!
+        //! The layout-swap alone is self-consistent: centers/sizes are key-derived node-cell bboxes,
+        //! identical in both views (conservative over-approximation for overlap bounds). Under the
+        //! fluid layout, updateSmoothingLengthIterative counts fluid-only neighbors, so the view
+        //! must be in place before step 7.
+        auto fluidTreeView   = domain.octreeProperties();
+        fluidTreeView.layout = cstone::rawPtr(fluidLayoutAcc_);
+        d.treeView           = fluidTreeView;
+        timer.step("fluidView");
 
-        //! @brief step 4 (contd): apply the partition ordering to the fixed field set, keys first, in sync order
-        auto gatherList = std::tuple_cat(std::tie(get<"keys">(d), get<"x">(d), get<"y">(d), get<"z">(d), get<"h">(d)),
-                                                 std::tie(get<"m">(d)), get<ConservedFields>(d),
-                                                 get<DependentFields>(d));
-        util::for_each_tuple(
-            [bufSize](auto& field)
-            {
-                if (field.size() != bufSize)
-                {
-                    throw std::runtime_error("ve-pt partition: field size does not match buffer size\n");
-                }
-            },
-            gatherList);
-        cstone::gatherArrays(domain.exec(), std::span<const cstone::LocalIndex>{cstone::rawPtr(ordering_), bufSize}, 0,
-                             gatherList, std::tie(partitionScratch_));
-
-        computeGroups(first, last, d, domain.box(), groups_);
+        //! @brief step 7: SPH pipeline on the fluid range [fluidFirst:fluidLast) with the fluid view
+        computeGroups(fluidFirst, fluidLast, d, domain.box(), groups_);
         timer.step("computeGroups");
         updateSmoothingLengthIterative(groups_.view(), d, domain.box());
         timer.step("updateSmoothingLengthIterative");
-        findNeighborsSfc(groups_.view(), d, domain.box());
+        findNeighborsSfc(groups_.view(), d, domain.box(), false, nFluid);
         timer.step("FindNeighbors");
         pmReader.step();
 
         computeXMass(d, domain.box());
         timer.step("XMass");
-        domain.exchangeHalos(std::tie(get<"xm">(d)), get<"ax">(d), get<"keys">(d));
-        timer.step("mpi::synchronizeHalos");
+        exchangeFluidHalos_(domain, std::tie(get<"xm">(d)));
+        timer.step("fluidHaloExchange");
 
         computeVe(d, domain.box());
         timer.step("Generalized Volume Elements");
-        domain.exchangeHalos(get<"vx", "vy", "vz", "kx">(d), get<"ax">(d), get<"keys">(d));
-        timer.step("mpi::synchronizeHalos");
+        exchangeFluidHalos_(domain, get<"vx", "vy", "vz", "kx">(d));
+        timer.step("fluidHaloExchange");
 
-        release(d, "ay", "az");
-        acquire(d, "divv", "gradh");
+        //! @brief step 7 (contd): state-aware field rotation, both legs coupled on the trigger flag
+        //!
+        //! When the trio is dependent (requested outputs), both pairs are skipped: releasing ay/az
+        //! without consuming them would strand them released (acquireOne throws on non-unused,
+        //! releaseOne throws on non-dependent). Nothing reads ay/az between the rotation legs (pure
+        //! buffer donation; the IAD input tuple has no ay/az). Otherwise run both pairs as ve does.
+        if (!iadTrioRequested_)
+        {
+            release(d, "ay", "az");
+            acquire(d, "divv", "gradh");
+        }
+        //! @brief the IAD kernel selects the curlv branch whenever the curlv buffer is full-length:
+        //! assert the gating survives the compaction (curlv is permanently allocated when requested)
+        assert(!iadTrioRequested_ || get<"curlv">(d).size() == get<"x">(d).size());
         computeIadDivvCurlvGradh(d, domain.box());
-        d.minDtRho = rhoTimestep(first, last, d);
+        d.minDtRho = rhoTimestep(fluidFirst, fluidLast, d);
         timer.step("IadVelocityDivCurlGradh");
 
-        computeEOS(first, last, d);
+        computeEOS(fluidFirst, fluidLast, d);
         timer.step("EquationOfState");
 
-        domain.exchangeHalos(get<"c11", "c12", "c13", "c22", "c23", "c33", "divv", "c">(d), get<"ax">(d),
-                             get<"keys">(d));
-        timer.step("mpi::synchronizeHalos");
+        exchangeFluidHalos_(domain, get<"c11", "c12", "c13", "c22", "c23", "c33", "divv", "c">(d));
+        timer.step("fluidHaloExchange");
 
         computeAVswitches(d, domain.box());
         timer.step("AVswitches");
 
         if (avClean)
         {
-            domain.exchangeHalos(get<"dV11", "dV12", "dV13", "dV22", "dV23", "dV33", "prho", "alpha">(d), get<"ax">(d),
-                                 get<"keys">(d));
+            exchangeFluidHalos_(domain, get<"dV11", "dV12", "dV13", "dV22", "dV23", "dV33", "prho", "alpha">(d));
         }
-        else { domain.exchangeHalos(get<"prho", "alpha">(d), get<"ax">(d), get<"keys">(d)); }
-        timer.step("mpi::synchronizeHalos");
+        else { exchangeFluidHalos_(domain, get<"prho", "alpha">(d)); }
+        timer.step("fluidHaloExchange");
 
-        release(d, "divv", "gradh");
-        acquire(d, "ay", "az");
+        if (!iadTrioRequested_)
+        {
+            release(d, "divv", "gradh");
+            acquire(d, "ay", "az");
+        }
         computeMomentumEnergy<avClean>(groups_.view(), nullptr, d, domain.box());
         timer.step("MomentumAndEnergy");
         pmReader.step();
+
+        //! @brief step 9: restore the full SFC layout before gravity (a full-layout routine)
+        unpartition_(domain, simData);
+        timer.step("partitionRestore");
 
         if (d.g != 0.0)
         {
@@ -258,19 +367,6 @@ public:
             timer.logStatistics("sumP2P", stats[0] / timer.getLastStepTime());
             timer.logStatistics("sumM2P", stats[2] / timer.getLastStepTime());
         }
-
-        //! @brief step 9: restore the full SFC order by applying the cached inverse permutation
-        //!
-        //! gather with orderingInv_ computes dst[j] = partitioned[orderingInv_[j]] = original[j];
-        //! never restore by re-sorting on keys (unconverged particles carry keys[i] = removeKey).
-        if (orderingInv_.size() != bufSize)
-        {
-            throw std::runtime_error("ve-pt: inverse partition ordering size mismatch\n");
-        }
-        cstone::gatherArrays(domain.exec(), std::span<const cstone::LocalIndex>{cstone::rawPtr(orderingInv_), bufSize}, 0,
-                             gatherList, std::tie(partitionScratch_));
-        d.treeView = domain.octreeProperties();
-        timer.step("partitionRestore");
     }
 
     void integrate(DomainType& domain, DataType& simData) override
@@ -291,7 +387,7 @@ public:
     }
 
     void saveFields(IFileWriter* writer, size_t first, size_t last, DataType& simData,
-                    const cstone::Box<T>& box) override
+                    const cstone::Box<T>& /* box */) override
     {
         auto& d             = simData.hydro;
         auto  fieldPointers = d.data();
@@ -331,25 +427,37 @@ public:
             }
         };
 
-        // first output pass: write everything allocated at the end of computeForces()
+        // first output pass: write everything allocated at the end of computeForces(); the requested
+        // divv/curlv/gradh are permanently allocated and phase-7-written, so they are attached by
+        // the phase-9 restore and written directly here (no recompute pass)
         output();
 
-        // second output pass: write temporary quantities produced by the EOS
-        release(d, "c11", "c12", "c13");
-        acquire(d, "rho", "p", "gradh");
-        computeEOS(first, last, d);
-        output();
-        release(d, "rho", "p", "gradh");
-        acquire(d, "c11", "c12", "c13");
-
-        // third output pass: recover temporary curlv and divv quantities
-        release(d, "prho", "c");
-        acquire(d, "divv", "curlv");
-        // partial recovery of cij in range [first:last] without halos, which are not needed for divv and curlv
-        if (!indicesDone.empty()) { computeIadDivvCurlvGradh(d, box); }
-        output();
-        release(d, "divv", "curlv");
-        acquire(d, "prho", "c");
+        // second output pass: write temporary quantities produced by the EOS; computeEOS is
+        // element-wise, so it is safe in the full SFC layout after the restore
+        if (iadTrioRequested_)
+        {
+            // gradh is already dependent (requested output, must not be re-acquired: acquireOne
+            // throws on non-unused): release only c11,c12 donors, acquire only rho,p. Releasing
+            // three donors for two acquires would strand c13 released and starve the closing
+            // acquire; in the other branch a literal release(rho,p) would do the same.
+            release(d, "c11", "c12");
+            acquire(d, "rho", "p");
+            computeEOS(first, last, d);
+            output();
+            release(d, "rho", "p");
+            acquire(d, "c11", "c12");
+        }
+        else
+        {
+            release(d, "c11", "c12", "c13");
+            acquire(d, "rho", "p", "gradh");
+            computeEOS(first, last, d);
+            output();
+            release(d, "rho", "p", "gradh");
+            acquire(d, "c11", "c12", "c13");
+            // c11/c12 keep rho/p values in [first:last] (ve's partial cij recovery dropped):
+            // harmless, nothing consumes cij before the next IAD
+        }
 
         /* The following data is now lost and no longer available in the integration step
          *  c11, c12, c12: halos invalidated
@@ -366,6 +474,168 @@ public:
             std::cout << d.fieldNames[indicesDone.back()] << std::endl;
         }
         timer.step("FileOutput");
+    }
+
+private:
+    //! @brief the fixed partition gather set, keys first, in sync gather order; ptype rides in ConservedFields
+    auto fixedGatherList(DataType& simData)
+    {
+        auto& d = simData.hydro;
+        return std::tuple_cat(std::tie(get<"keys">(d), get<"x">(d), get<"y">(d), get<"z">(d), get<"h">(d)),
+                                       std::tie(get<"m">(d)), get<ConservedFields>(d), get<DependentFields>(d));
+    }
+
+    //! @brief release-safe application of one partition permutation to a gather set
+    //!
+    //! Per-field size == ordering-size throw (gatherArrays' own asserts compile out in release, and
+    //! M0's release-active throw on array.size() < ordering.size() catches the null-source gather of
+    //! a size-0 field). The scratch is addressed fresh on every call: gatherArrays may swap it with
+    //! a same-type array (keys/id), so raw pointers are never cached across an apply.
+    template<class... Arrays>
+    void applyPermutation_(const Acc& exec, std::span<const cstone::LocalIndex> ordering,
+                           std::tuple<Arrays&...> arrays)
+    {
+        size_t bufSize = ordering.size();
+        util::for_each_tuple(
+            [bufSize](auto& field)
+            {
+                if (field.size() != bufSize)
+                {
+                    throw std::runtime_error("ve-pt partition: field size does not match buffer size\n");
+                }
+            },
+            arrays);
+        cstone::gatherArrays(exec, ordering, 0, arrays, std::tie(partitionScratch_));
+    }
+
+    //! @brief step 4: fused stable partition + application of the ordering to the full gather set
+    //!
+    //! One of the exactly four per-step layout transitions (steps 4/9 here, integrate 3/4 in M3);
+    //! all of them go through partition_/unpartition_. Never hand a fluid index to a full-layout
+    //! routine (esp. rhoTimestep, gravity, output) or vice versa.
+    void partition_(DomainType& domain, DataType& simData, size_t nFluid)
+    {
+        auto&  d       = simData.hydro;
+        size_t bufSize = domain.nParticlesWithHalos();
+
+        ordering_.resize(bufSize);
+        orderingInv_.resize(bufSize);
+        partitionScratch_.resize(bufSize);
+
+        //! the head of partitionScratch_ serves as the GPU flags buffer (exclusive scan of the
+        //! non-fluid flags), carved before the gathers
+        cstone::stablePartition(domain.exec(), cstone::rawPtr(d.ptype), bufSize, nFluid, cstone::rawPtr(ordering_),
+                                cstone::rawPtr(orderingInv_),
+                                reinterpret_cast<unsigned*>(cstone::rawPtr(partitionScratch_)));
+
+        applyPermutation_(domain.exec(), {cstone::rawPtr(ordering_), bufSize}, fixedGatherList(simData));
+        if (iadTrioRequested_)
+        {
+            applyPermutation_(domain.exec(), {cstone::rawPtr(ordering_), bufSize},
+                              std::tie(get<"divv">(d), get<"curlv">(d), get<"gradh">(d)));
+        }
+    }
+
+    //! @brief step 9: restore the full SFC order with the cached inverse permutation
+    void unpartition_(DomainType& domain, DataType& simData)
+    {
+        auto&  d       = simData.hydro;
+        size_t bufSize = domain.nParticlesWithHalos();
+
+        //! release-safe: the fused kernel writes one orderingInv_ entry per i (the debug asserts
+        //! compile out in release)
+        if (orderingInv_.size() != bufSize)
+        {
+            throw std::runtime_error("ve-pt: inverse partition ordering size mismatch\n");
+        }
+
+        //! gather with orderingInv_ computes dst[j] = partitioned[orderingInv_[j]] = original[j];
+        //! never restore by re-sorting on keys (unconverged particles carry keys[i] = removeKey)
+        applyPermutation_(domain.exec(), {cstone::rawPtr(orderingInv_), bufSize}, fixedGatherList(simData));
+        if (iadTrioRequested_)
+        {
+            applyPermutation_(domain.exec(), {cstone::rawPtr(orderingInv_), bufSize},
+                              std::tie(get<"divv">(d), get<"curlv">(d), get<"gradh">(d)));
+        }
+
+        d.treeView = domain.octreeProperties();
+    }
+
+    //! @brief fluid halo exchange with the dedicated scratch buffers (invariant (d))
+    //!
+    //! The fluid exchanges bypass the domain's checkSizesEqual entirely (direct Halos calls), so the
+    //! pre-size check happens here, at the call sites.
+    template<class... Vectors>
+    void exchangeFluidHalos_(DomainType& domain, std::tuple<Vectors&...> arrays)
+    {
+        size_t bufSize = domain.nParticlesWithHalos();
+        util::for_each_tuple(
+            [bufSize](auto& field)
+            {
+                if (field.size() != bufSize)
+                {
+                    throw std::runtime_error("ve-pt fluid halo exchange: field size does not match buffer size\n");
+                }
+            },
+            arrays);
+        fluidHalos_->exchangeHalos(domain.exec(), arrays, fluidHaloSendScratch_, fluidHaloRecvScratch_);
+    }
+
+    /*! @brief debug-only peer-consistency check of the fluid halo pattern
+     *
+     * Turns a stale halo ptype (which yields a peer-inconsistent fluidLayout) into a clean assert
+     * instead of an MPI size-mismatch hang. Verifies that every fluid halo sent by any peer matches
+     * the local incoming range, and that the incoming ranges tile the halo fluid slots
+     * [0:fluidFirst) + [fluidLast:nFluid) of the compacted buffer.
+     *
+     * The checks assert (abort the rank, tearing down the mpirun job) rather than throw: a thrown,
+     * caught violation would hang the peer at the next collective — the exact failure mode this
+     * check exists to expose.
+     */
+    void assertFluidHalosConsistent([[maybe_unused]] const DataType& simData, [[maybe_unused]] size_t fluidFirst,
+                                    [[maybe_unused]] size_t fluidLast, [[maybe_unused]] size_t nFluid) const
+    {
+#ifndef NDEBUG
+        assert(fluidLayoutHost_.back() == nFluid);
+
+        int numRanks = 0, myRank = 0;
+        MPI_Comm_size(simData.comm, &numRanks);
+        MPI_Comm_rank(simData.comm, &myRank);
+
+        // entry [i * numRanks + j] = number of fluid halos rank i sends to rank j
+        std::vector<int> sendCounts(size_t(numRanks) * numRanks, 0);
+        for (int peer = 0; peer < numRanks; ++peer)
+        {
+            sendCounts[size_t(myRank) * numRanks + peer] = int(fluidHalos_->outgoing()[peer].totalCount());
+        }
+        MPI_Allreduce(MPI_IN_PLACE, sendCounts.data(), int(sendCounts.size()), MPI_INT, MPI_SUM, simData.comm);
+
+        for (int peer = 0; peer < numRanks; ++peer)
+        {
+            assert(sendCounts[size_t(peer) * numRanks + myRank] == int(fluidHalos_->incoming()[peer].count()) &&
+                   "ve-pt: fluid halo request mismatch with a peer rank");
+        }
+
+        // the incoming ranges must tile [0:fluidFirst) + [fluidLast:nFluid); the only allowed gap is
+        // the owned fluid range [fluidFirst:fluidLast)
+        std::vector<std::pair<size_t, size_t>> ranges;
+        for (int peer = 0; peer < numRanks; ++peer)
+        {
+            auto in = fluidHalos_->incoming()[peer];
+            if (in.count() > 0) { ranges.emplace_back(in.start(), in.start() + in.count()); }
+        }
+        std::sort(ranges.begin(), ranges.end());
+
+        size_t covered = 0;
+        for (auto [rangeStart, rangeEnd] : ranges)
+        {
+            assert((rangeStart == covered || (covered == fluidFirst && rangeStart == fluidLast)) &&
+                   "ve-pt: fluid halo incoming ranges do not tile the halo fluid slots");
+            covered = rangeEnd;
+        }
+        assert((covered == nFluid || (covered == fluidFirst && fluidLast == nFluid)) &&
+               "ve-pt: fluid halo incoming ranges do not tile the halo fluid slots");
+#endif
     }
 };
 

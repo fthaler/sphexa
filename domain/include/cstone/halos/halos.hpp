@@ -111,6 +111,11 @@ public:
             arrays);
     }
 
+    //! @brief halo index ranges (per peer rank), built by exchangeRequests and consumed by the
+    //! exchangeHalos calls up to the next exchangeRequests
+    const SendList& outgoing() const { return outgoingHaloIndices_; }
+    const RecvList& incoming() const { return incomingHaloIndices_; }
+
 private:
     int myRank_;
     MPI_Comm comm_;

@@ -23,7 +23,8 @@ struct DeviceNeighborhoodData
     void disableNeighborLists();
 
     template<class Dataset, class T>
-    void build(const cstone::GroupView& groups, Dataset& d, const cstone::Box<T>& box, bool subgroups);
+    void build(const cstone::GroupView& groups, Dataset& d, const cstone::Box<T>& box, bool subgroups,
+               cstone::LocalIndex totalBodies = 0);
 
     template<class... Args>
     void ijLoop(cstone::ijloop::IjLoopData<Args...>) const;
@@ -42,7 +43,8 @@ using ClusteredNeighborhoodBuilder =
 struct DeviceNeighborhoodData::Impl
 {
     template<class Dataset, class T>
-    void build(const cstone::GroupView& groups, Dataset& d, const cstone::Box<T>& box, bool subgroups)
+    void build(const cstone::GroupView& groups, Dataset& d, const cstone::Box<T>& box, bool subgroups,
+               cstone::LocalIndex totalBodies)
     {
         if (subgroups && groups.firstBody == 0 && groups.lastBody == 0)
         {
@@ -76,10 +78,11 @@ struct DeviceNeighborhoodData::Impl
             }
             else { builder = cstone::ijloop::GpuAlwaysTraverseNeighborhoodBuilder{d.ngmax}; }
 
+            if (totalBodies == 0) { totalBodies = d.size(); }
             std::visit(
                 [&](auto const& nb)
                 {
-                    neighborhood = nb.build(cstone::execution::gpuDefaultStream, d.treeView, box, d.size(), groups,
+                    neighborhood = nb.build(cstone::execution::gpuDefaultStream, d.treeView, box, totalBodies, groups,
                                             rawPtr(d.x), rawPtr(d.y), rawPtr(d.z), rawPtr(d.h));
                 },
                 builder);
@@ -109,10 +112,10 @@ struct DeviceNeighborhoodData::Impl
 
 template<class Dataset, class T>
 void DeviceNeighborhoodData::build(const cstone::GroupView& groups, Dataset& d, const cstone::Box<T>& box,
-                                   bool subgroups)
+                                   bool subgroups, cstone::LocalIndex totalBodies)
 {
     assert(impl);
-    impl->build(groups, d, box, subgroups);
+    impl->build(groups, d, box, subgroups, totalBodies);
 }
 
 template<class... Args>

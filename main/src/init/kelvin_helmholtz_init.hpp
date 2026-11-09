@@ -210,6 +210,7 @@ public:
         T      particleMass = volumeHD * settings_.at("rhoInt") / npartInner;
 
         d.resize(d.x.size());
+        cstone::fill(d.exec, d.ptype.begin(), d.ptype.end(), 0);
 
         settings_["numParticlesGlobal"] = double(numParticlesGlobal);
         BuiltinWriter attributeSetter(settings_);

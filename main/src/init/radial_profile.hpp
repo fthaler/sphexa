@@ -72,6 +72,7 @@ size_t syncAndLoadAttributes(int rank, int numRanks, Dataset& d, MPI_Comm comm, 
     if (rank == 0) std::cout << "earlySync " << std::chrono::duration<float>(t1 - t0).count() << std::endl;
 
     d.resize(d.x.size());
+    cstone::fill(d.exec, d.ptype.begin(), d.ptype.end(), 0);
     return numParticlesGlobal;
 }
 

@@ -20,7 +20,7 @@ criteria live in `overview.md` (shared invariants, dependency chain) and the
 | M | File | Scope | Depends on | Status | Gate |
 |---|---|---|---|---|---|
 | M0 | `milestone-0.md` | cstone primitives (stable partition, fluid layout, masked fill, uint8 gather, `gatherArrays` hardening) + tests | — | done | unit tests, debug+release (+CUDA) |
-| M1 | `milestone-1.md` | `ve-pt` skeleton, ptype end-to-end, partition→restore, CPU bitwise `ve` equivalence | M0 | not-started | CPU bitwise gate |
+| M1 | `milestone-1.md` | `ve-pt` skeleton, ptype end-to-end, partition→restore, CPU bitwise `ve` equivalence | M0 | done | CPU bitwise gate |
 | M2 | `milestone-2.md` | fluid SPH phase: `(ptype, m)` exchange, `fluidHalos_`, fluid tree view/groups/pipeline, saveFields rework, `--nonfluid-frac`, 2-rank tests | M1 | not-started | all-fluid bitwise + 2-rank mixed configs |
 | M2b | `milestone-2b.md` | SPH empty-range hardening (`rhoTimestep`, `minMax(Gpu)`, `reduceDt`) + zero-fluid-rank config | M2 | not-started | config (b), CPU + CUDA |
 | M3 | `milestone-3.md` | integrate: drift groups, masked energy update, masked accel zeroing, fluid-only h update, GPU bitwise gate | M2b | not-started | GPU bitwise gate + 30% mixed smoke |
@@ -54,19 +54,19 @@ Tests / acceptance:
 
 Implementation:
 
-- [ ] `particles_data.hpp`: `FieldVector<uint8_t> ptype` + `"ptype"` appended at the **end** of both `fieldNames` and `dataTuple()`
-- [ ] Init zero-fill `ptype` at all 12 anchors (14 paths): `RadialProfile` base; `GreshoChan`, `IsobaricCubeGlass`, `KelvinHelmholtzGlass`, `NohGlassSphere`, `SedovGrid` (after **second** resize), `SedovGlass`, `TurbulenceGlass`, `WindShockGlass`; `FileInit`/`TDEOrbitInit` (missing-ptype branch); `FileSplitInit` (always-fill)
-- [ ] `ve_hydro_pt.hpp`: aliases (`ConservedFields` + `"ptype"`), `conservedFields()` filters `"ptype"`, members `ordering_`/`orderingInv_` (`AccVector<LocalIndex>`) + keys-sized `partitionScratch_`; **no** M2 members yet
-- [ ] `sync()` verbatim copy (branching incl. `m` folded into conserved at `g == 0`); no ptype/m exchange yet
-- [ ] `computeForces`: partition (step 4) after `d.resize`, flat-tuple `gatherArrays` apply with per-field `size == bufSize` **throw**, restore (step 9) via `orderingInv_` + `d.treeView` reset; SPH/gravity exactly as `ve`; `fillMassHalos` **kept**
-- [ ] `saveFields`: ve's three passes + `"ptype"` appended to `indicesDone`/`namesDone` iff absent
-- [ ] `integrate` copied unchanged
-- [ ] `ve_hydro_pt.cpp` factory + explicit instantiation; registration: `propagator.h`, `factory.hpp` (`ve-pt`), `propagator/CMakeLists.txt` `PROP_SOURCES`, `compare_develop.py` literal (do **not** touch `FIELDS`)
-- [ ] Timers firing: `partition`, `partitionRestore` (other three reserved for M2)
+- [x] `particles_data.hpp`: `FieldVector<uint8_t> ptype` + `"ptype"` appended at the **end** of both `fieldNames` and `dataTuple()`
+- [x] Init zero-fill `ptype` at the 10 fillable anchors (of 12 total / 14 paths): `RadialProfile` base; `GreshoChan`, `IsobaricCubeGlass`, `KelvinHelmholtzGlass`, `NohGlassSphere`, `SedovGrid` (after **second** resize), `SedovGlass`, `TurbulenceGlass`, `WindShockGlass`; `FileInit`/`TDEOrbitInit` — no fill today: missing-ptype branch unreachable before M4's tolerant reader (`readField` hard-fails first); `FileSplitInit` (always-fill)
+- [x] `ve_hydro_pt.hpp`: aliases (`ConservedFields` + `"ptype"`), `conservedFields()` filters `"ptype"`, members `ordering_`/`orderingInv_` (`AccVector<LocalIndex>`) + keys-sized `partitionScratch_`; **no** M2 members yet
+- [x] `sync()` verbatim copy (branching incl. `m` folded into conserved at `g == 0`); no ptype/m exchange yet
+- [x] `computeForces`: partition (step 4) after `d.resize`, flat-tuple `gatherArrays` apply with per-field `size == bufSize` **throw**, restore (step 9) via `orderingInv_` + `d.treeView` reset; SPH/gravity exactly as `ve`; `fillMassHalos` **kept**
+- [x] `saveFields`: ve's three passes + `"ptype"` appended to `indicesDone`/`namesDone` iff absent
+- [x] `integrate` copied unchanged
+- [x] `ve_hydro_pt.cpp` factory + explicit instantiation; registration: `propagator.h`, `factory.hpp` (`ve-pt`), `propagator/CMakeLists.txt` `PROP_SOURCES`, `compare_develop.py` literal (do **not** touch `FIELDS`)
+- [x] Timers firing: `partition`, `partitionRestore` (other three reserved for M2)
 
 Acceptance (CPU build, 1 rank, no `-f`, `-w 10` required):
 
-- [ ] Gate: `ve` vs `ve-pt` evrard glass bitwise-identical per dataset (h5py check in `milestone-1.md`), ve-pt `ptype` all zero, same step groups
+- [x] Gate: `ve` vs `ve-pt` evrard glass bitwise-identical per dataset (h5py check in `milestone-1.md`), ve-pt `ptype` all zero, same step groups — green (user-executed runs; `particle-types/check_gate.py`: same step groups, all ve-named datasets bitwise-identical, ptype all zero, `ptype` sole extra dataset). Release CPU build `build-cpu-gate` (`-DSPH_EXA_WITH_CUDA=OFF`, `-DSPH_EXA_HDF5_PARALLEL_MODE=collective`), 1 rank, 2026-11-04.
 
 ---
 
@@ -191,3 +191,7 @@ Append one line per work session: `- YYYY-MM-DD — <milestone> — what was don
 - 2026-11-04 — — M0 verified: standalone cstone builds `build-cstone-{debug,release}` (CPU) and `build-cstone-cuda{,-debug}` (CUDA, with `-DCMAKE_CUDA_FLAGS=--extended-lambda`).
 - 2026-11-04 — M0 — code-review fixes: `<cassert>` include in `primitives_acc.hpp`; shared test-verification header `unit/primitives/stable_partition_checks.hpp` (dedupes CPU/GPU checkers + random driver); GPU `stablePartition` tests now also run the spec'd gather check; `computeFluidLayout(Gpu)` turned into extern template + explicit instantiation (launch helper now file-local); deduped owned-range fill in `exchange_ptype.cpp`; comment wording aligned with CONTEXT.md; CMake checkbox corrected above.
 - 2026-11-04 — M0 — second code-review round: `stable_partition.cu` gather check now round-trips the ordering through a `DeviceVector<LocalIndex>` (device span into `gather` — fixes host-pointer-into-kernel spec defect); gather verification deduped into `stable_partition_checks.hpp` as `checkGatherResult` (host buffers, shared by CPU/GPU tests); unique-x global lookup deduped in `exchange_ptype.cpp` via file-local `globalIndex` helper; `extern` added to the `computeFluidLayout(Gpu)` declaration in `primitives_gpu.h`; `constexpr`→`const` for `thisExampleRanks` (matches `domain_2ranks.cpp`); SFC-comment typo fixed. Verified: full CPU unit suite 339/339 in `build-cstone-debug` and `build-cstone-release`; `component_units_cuda` compiles+links in `build-cstone-cuda` and `build-cstone-cuda-debug`; `exchange_ptype` (CPU debug+release) and `exchange_ptype_gpu` (CUDA release+debug) compile clean. CUDA/MPI compile-only this session (no GPU/mpirun available).
+- 2026-11-04 — M1 — implemented ptype end-to-end: field + fieldNames/dataTuple append (`particles_data.hpp`); 10 fill anchors (FileInit/TDEOrbitInit intentionally none pre-M4: missing-ptype branch unreachable, `readField` hard-fails); `ve_hydro_pt.hpp/.cpp` + registration (`propagator.h`, `factory.hpp` `ve-pt`, `PROP_SOURCES`, `compare_develop.py` literal). Deviation: M0's `stablePartition` takes 7 args `(exec, ptype, n, nFluid, ordering, orderingInv, workspace)` — milestone-1 sketch showed 6; adapted. Builds green: fresh CPU-only cmake builds `build-cpu-gate{,-debug}` (Release/Debug, `-DSPH_EXA_WITH_CUDA=OFF`); `component_units` 339/339 (Debug plain+OMP, Release), `sph_tests` 20/20 (Release+Debug), `propagator_gpu` (ve_hydro_pt under nvcc 13.1, `--extended-lambda`) compiles clean. Pre-existing, unrelated: 6 ryoanji CPU Ewald test failures on this host; `frontend_units` blocked by the same cray-mpich `gtlt_cuda_init` startup assert as `sphexa`. CPU bitwise gate runs (Release, 1 rank, no `-f`, `-w 10`) handed to the user; h5py check to follow.
+- 2026-11-04 — M1 — gate env fix: first gate attempt failed at H5 write — this filesystem requires collective HDF5; `SPH_EXA_HDF5_PARALLEL_MODE` is a CMake configure-time option (compile definition in `main/src/io/CMakeLists.txt`, consumed in `h5part_wrapper.hpp:294-300`), not a runtime env var. Both gate builds reconfigured with `-DSPH_EXA_HDF5_PARALLEL_MODE=collective` and `sphexa` rebuilt (Release + Debug). Stale partial `ve.h5`/`vept.h5` from the failed attempt deleted (writer opens with `H5_O_RDWR`, would append). Rerun commands re-issued to user.
+- 2026-11-04 — M1 — gate green: `ve.h5` vs `vept.h5` bitwise-identical per dataset (same step groups, `ptype` all zero, `ptype` the only extra dataset), verified with `particle-types/check_gate.py` (implements the milestone-1.md h5py check). Runs by user: 1 rank, Release CPU build `build-cpu-gate` (`-DSPH_EXA_WITH_CUDA=OFF`, `-DSPH_EXA_HDF5_PARALLEL_MODE=collective`), evrard glass, `-n 50 -s 10 -w 10`. M1 done. Reusable gate script kept at `particle-types/check_gate.py` for the M2 all-fluid and M3 GPU gates.
+- 2026-11-09 — M1 — code-review round (vs progress.md claims): all M1 items verified implemented; fixes: `<cassert>` moved from `primitives_gpu.h` to `primitives_gpu.cu` (the `assert` user was relying on a transitive include); session-log anchor count corrected 11→10; line-58 anchor wording now says 10 fillable of 12 total; `ptype` glossary entry added to `CONTEXT.md`; ADR-0001 records the ve-pt fork decision.

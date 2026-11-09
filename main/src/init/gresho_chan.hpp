@@ -159,6 +159,7 @@ public:
         d.y = y;
         d.z = z;
         d.resize(d.x.size());
+        cstone::fill(d.exec, d.ptype.begin(), d.ptype.end(), 0);
 
         settings_["numParticlesGlobal"] = double(numParticlesGlobal);
         BuiltinWriter attributeSetter(settings_);

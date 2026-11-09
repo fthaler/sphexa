@@ -156,6 +156,7 @@ public:
         MPI_Allreduce(MPI_IN_PLACE, &numParticlesGlobal, 1, MpiType<size_t>{}, MPI_SUM, simData.comm);
 
         d.resize(d.x.size());
+        cstone::fill(d.exec, d.ptype.begin(), d.ptype.end(), 0);
 
         settings_["numParticlesGlobal"] = double(numParticlesGlobal);
         BuiltinWriter attributeSetter(settings_);

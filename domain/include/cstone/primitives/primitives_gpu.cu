@@ -13,6 +13,7 @@
  * @author Sebastian Keller <sebastian.f.keller@gmail.com>
  */
 
+#include <cassert>
 #include <stdexcept>
 #include <vector>
 

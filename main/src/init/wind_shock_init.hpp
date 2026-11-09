@@ -227,6 +227,7 @@ public:
         syncCoords<KeyType>(rank, numRanks, numParticlesGlobal, d.x, d.y, d.z, globalBox);
 
         d.resize(d.x.size());
+        cstone::fill(d.exec, d.ptype.begin(), d.ptype.end(), 0);
 
         settings_["numParticlesGlobal"] = double(numParticlesGlobal);
         BuiltinWriter attributeSetter(settings_);

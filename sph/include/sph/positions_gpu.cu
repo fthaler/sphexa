@@ -75,6 +75,8 @@ __global__ void driftKernel(GroupView grp, float dt, float dt_back, util::array<
     util::tie(x[i], y[i], z[i])    = util::tie(Xnp1[0], Xnp1[1], Xnp1[2]);
     util::tie(vx[i], vy[i], vz[i]) = util::tie(Vnp1[0], Vnp1[1], Vnp1[2]);
 
+    // note: the energy branch below is unmasked (no ptype gate): driftPositions is only used by the
+    // bdt propagators in all-fluid configs
     if (temp != nullptr)
     {
         Thydro cv      = (constCv < 0) ? idealGasCv(mui[i], gamma) : constCv;
@@ -118,9 +120,9 @@ DRIFT_GPU(float, float, float, float);
 template<class Tc, class Tv, class Ta, class Tdu, class Tm1, class Tt, class Thydro>
 __global__ void computePositionsKernel(GroupView grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1, Tc* x,
                                        Tc* y, Tc* z, Tv* vx, Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax,
-                                       Ta* ay, Ta* az, const uint8_t* rung, Tt* temp, Tt* u, Tdu* du, Tm1* du_m1,
-                                       Thydro* h, Thydro* mui, Tc gamma, Tc constCv, const cstone::Box<Tc> box,
-                                       bool anyFBC)
+                                       Ta* ay, Ta* az, const uint8_t* rung, const uint8_t* ptype, Tt* temp, Tt* u,
+                                       Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma, Tc constCv,
+                                       const cstone::Box<Tc> box, bool anyFBC)
 {
     LocalIndex laneIdx = threadIdx.x & (GpuConfig::warpSize - 1);
     LocalIndex warpIdx = (blockDim.x * blockIdx.x + threadIdx.x) >> GpuConfig::warpSizeLog2;
@@ -146,7 +148,8 @@ __global__ void computePositionsKernel(GroupView grp, float dt, util::array<floa
     util::tie(vx[i], vy[i], vz[i])       = util::tie(V[0], V[1], V[2]);
 
     Tc minDistanceFactor = min(adjustForFBC);
-    if (temp != nullptr)
+    bool energyEnabled   = energyUpdateEnabled(ptype, i);
+    if (temp != nullptr && energyEnabled)
     {
         Thydro cv    = (constCv < 0) ? idealGasCv(mui[i], gamma) : constCv;
         auto   u_old = temp[i] * cv;
@@ -155,7 +158,7 @@ __global__ void computePositionsKernel(GroupView grp, float dt, util::array<floa
         temp[i]  = energyUpdate(u_old, dt * minDistanceFactor, dt_m1_rung * minDistanceFactor, du[i], du_m1[i]) / cv;
         du_m1[i] = du[i];
     }
-    else if (u != nullptr)
+    else if (u != nullptr && energyEnabled)
     {
         // notice the common factor of dt in energyUpdate: to apply the Fixed Boundary Correction we can do it on dt.
         // we multiply dt_m1 by that factor so it applies only once to each of the updating terms
@@ -167,8 +170,8 @@ __global__ void computePositionsKernel(GroupView grp, float dt, util::array<floa
 template<class Tc, class Tv, class Ta, class Tdu, class Tm1, class Tt, class Thydro>
 void computePositionsGpu(const GroupView& grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1, Tc* x, Tc* y,
                          Tc* z, Tv* vx, Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay, Ta* az,
-                         const uint8_t* rung, Tt* temp, Tt* u, Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma,
-                         Tc constCv, const cstone::Box<Tc>& box)
+                         const uint8_t* rung, const uint8_t* ptype, Tt* temp, Tt* u, Tdu* du, Tm1* du_m1, Thydro* h,
+                         Thydro* mui, Tc gamma, Tc constCv, const cstone::Box<Tc>& box)
 {
     unsigned numThreads       = 256;
     unsigned numWarpsPerBlock = numThreads / GpuConfig::warpSize;
@@ -179,14 +182,16 @@ void computePositionsGpu(const GroupView& grp, float dt, util::array<float, Time
 
     if (numBlocks == 0) { return; }
     computePositionsKernel<<<numBlocks, numThreads>>>(grp, dt, dt_m1, x, y, z, vx, vy, vz, x_m1, y_m1, z_m1, ax, ay, az,
-                                                      rung, temp, u, du, du_m1, h, mui, gamma, constCv, box, anyFBC);
+                                                      rung, ptype, temp, u, du, du_m1, h, mui, gamma, constCv, box,
+                                                      anyFBC);
 }
 
 #define POS_GPU(Tc, Tv, Ta, Tdu, Tm1, Tt, Thydro)                                                                      \
     template void computePositionsGpu(                                                                                 \
         const GroupView& grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1, Tc* x, Tc* y, Tc* z, Tv* vx,  \
-        Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay, Ta* az, const uint8_t* rung, Tt* temp, Tt* u, \
-        Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma, Tc constCv, const cstone::Box<Tc>& box)
+        Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay, Ta* az, const uint8_t* rung,                  \
+        const uint8_t* ptype, Tt* temp, Tt* u, Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma, Tc constCv,       \
+        const cstone::Box<Tc>& box)
 
 //        Tc      Tv     Ta      Tdu     Tm1     Tt      Thydro
 POS_GPU(double, double, double, double, double, double, double);

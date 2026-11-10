@@ -75,6 +75,7 @@ protected:
     using T             = typename DataType::RealType;
     using KeyType       = typename DataType::KeyType;
     using Tmass         = typename DataType::HydroData::Tmass;
+    using HydroType     = typename DataType::HydroData::HydroType;
     using MultipoleType = ryoanji::CartesianQuadrupole<Tmass>;
 
     using Acc       = typename DataType::Exec;
@@ -88,6 +89,15 @@ protected:
 
     MHolder_t      mHolder_;
     GroupData<Acc> groups_;
+
+    //! @brief groups over the full owned range for the integrate-step-2 KDK drift
+    //!
+    //! The phase-7 groups_ are only valid in the fluid-compacted layout under the cached
+    //! ordering_, while the drift is type-agnostic over the full SFC layout. On GPU the group
+    //! kernels process one warp per group, so a single whole-range group would integrate only
+    //! the first warp — hence warp-sized groups built from the full d.treeView, keeping the
+    //! phase-7 groups_ intact for the integrate-step-3 h update.
+    GroupData<Acc> driftGroups_;
 
     //! @brief cached stable-partition permutations of the particle buffer, see computeForces
     //!
@@ -169,6 +179,14 @@ public:
     void sync(DomainType& domain, DataType& simData) override
     {
         auto& d = simData.hydro;
+        //! @brief ve-pt v1: removal of unconverged particles is unsupported
+        //!
+        //! The flag arrives via file attribute (also on restart); rejecting at the first sync
+        //! keeps it a startup error instead of a mid-run behavior change.
+        if (d.removeUnconvergedParticles)
+        {
+            throw std::runtime_error("ve-pt: removeUnconvergedParticles is unsupported in ve-pt v1\n");
+        }
         if (d.g != 0.0)
         {
             domain.syncGrav(get<"keys">(d), get<"x">(d), get<"y">(d), get<"z">(d), get<"h">(d), get<"m">(d),
@@ -288,70 +306,116 @@ public:
         timer.step("fluidView");
 
         //! @brief step 7: SPH pipeline on the fluid range [fluidFirst:fluidLast) with the fluid view
-        computeGroups(fluidFirst, fluidLast, d, domain.box(), groups_);
-        timer.step("computeGroups");
-        updateSmoothingLengthIterative(groups_.view(), d, domain.box());
-        timer.step("updateSmoothingLengthIterative");
-        findNeighborsSfc(groups_.view(), d, domain.box(), false, nFluid);
-        timer.step("FindNeighbors");
-        pmReader.step();
-
-        computeXMass(d, domain.box());
-        timer.step("XMass");
-        exchangeFluidHalos_(domain, std::tie(get<"xm">(d)));
-        timer.step("fluidHaloExchange");
-
-        computeVe(d, domain.box());
-        timer.step("Generalized Volume Elements");
-        exchangeFluidHalos_(domain, get<"vx", "vy", "vz", "kx">(d));
-        timer.step("fluidHaloExchange");
-
-        //! @brief step 7 (contd): state-aware field rotation, both legs coupled on the trigger flag
         //!
-        //! When the trio is dependent (requested outputs), both pairs are skipped: releasing ay/az
-        //! without consuming them would strand them released (acquireOne throws on non-unused,
-        //! releaseOne throws on non-dependent). Nothing reads ay/az between the rotation legs (pure
-        //! buffer donation; the IAD input tuple has no ay/az). Otherwise run both pairs as ve does.
-        if (!iadTrioRequested_)
+        //! Skipped entirely on a zero-fluid rank: every kernel here is a no-op on an empty fluid
+        //! range except the neighborhood build, whose totalBodies=0 collides with the builder's
+        //! "unset -> d.size()" sentinel (neighborhood_gpu.hpp:81) — it would build lists over the
+        //! full buffer incl. non-fluid/halo slots and overflows the GPU clustered builder. The
+        //! fluid halo exchanges are request-driven: a zero-fluid rank has no requests in either
+        //! direction, so skipping them equals the empty exchange. The buffer rotation is per-rank
+        //! state (nothing on the skip path reads the donated buffers); minDtCourant keeps its init
+        //! value (reduceDt sits inside the skipped block).
+        if (nFluid > 0)
         {
-            release(d, "ay", "az");
-            acquire(d, "divv", "gradh");
+            computeGroups(fluidFirst, fluidLast, d, domain.box(), groups_);
+            timer.step("computeGroups");
+            updateSmoothingLengthIterative(groups_.view(), d, domain.box());
+            timer.step("updateSmoothingLengthIterative");
+            findNeighborsSfc(groups_.view(), d, domain.box(), false, nFluid);
+            timer.step("FindNeighbors");
+            pmReader.step();
+
+            computeXMass(d, domain.box());
+            timer.step("XMass");
+            exchangeFluidHalos_(domain, std::tie(get<"xm">(d)));
+            timer.step("fluidHaloExchange");
+
+            computeVe(d, domain.box());
+            timer.step("Generalized Volume Elements");
+            exchangeFluidHalos_(domain, get<"vx", "vy", "vz", "kx">(d));
+            timer.step("fluidHaloExchange");
+
+            //! @brief state-aware field rotation, both legs coupled on the trigger flag
+            //!
+            //! When the trio is dependent (requested outputs), both pairs are skipped: releasing ay/az
+            //! without consuming them would strand them released (acquireOne throws on non-unused,
+            //! releaseOne throws on non-dependent). Nothing reads ay/az between the rotation legs (pure
+            //! buffer donation; the IAD input tuple has no ay/az). Otherwise run both pairs as ve does.
+            if (!iadTrioRequested_)
+            {
+                release(d, "ay", "az");
+                acquire(d, "divv", "gradh");
+            }
+            //! @brief the IAD kernel selects the curlv branch whenever the curlv buffer is full-length:
+            //! assert the gating survives the compaction (curlv is permanently allocated when requested)
+            assert(!iadTrioRequested_ || get<"curlv">(d).size() == get<"x">(d).size());
+            computeIadDivvCurlvGradh(d, domain.box());
+            d.minDtRho = rhoTimestep(fluidFirst, fluidLast, d);
+            timer.step("IadVelocityDivCurlGradh");
+
+            computeEOS(fluidFirst, fluidLast, d);
+            timer.step("EquationOfState");
+
+            exchangeFluidHalos_(domain, get<"c11", "c12", "c13", "c22", "c23", "c33", "divv", "c">(d));
+            timer.step("fluidHaloExchange");
+
+            computeAVswitches(d, domain.box());
+            timer.step("AVswitches");
+
+            if (avClean)
+            {
+                exchangeFluidHalos_(domain, get<"dV11", "dV12", "dV13", "dV22", "dV23", "dV33", "prho", "alpha">(d));
+            }
+            else { exchangeFluidHalos_(domain, get<"prho", "alpha">(d)); }
+            timer.step("fluidHaloExchange");
+
+            if (!iadTrioRequested_)
+            {
+                release(d, "divv", "gradh");
+                acquire(d, "ay", "az");
+            }
+            computeMomentumEnergy<avClean>(groups_.view(), nullptr, d, domain.box());
+            timer.step("MomentumAndEnergy");
+            pmReader.step();
         }
-        //! @brief the IAD kernel selects the curlv branch whenever the curlv buffer is full-length:
-        //! assert the gating survives the compaction (curlv is permanently allocated when requested)
-        assert(!iadTrioRequested_ || get<"curlv">(d).size() == get<"x">(d).size());
-        computeIadDivvCurlvGradh(d, domain.box());
-        d.minDtRho = rhoTimestep(fluidFirst, fluidLast, d);
-        timer.step("IadVelocityDivCurlGradh");
-
-        computeEOS(fluidFirst, fluidLast, d);
-        timer.step("EquationOfState");
-
-        exchangeFluidHalos_(domain, get<"c11", "c12", "c13", "c22", "c23", "c33", "divv", "c">(d));
-        timer.step("fluidHaloExchange");
-
-        computeAVswitches(d, domain.box());
-        timer.step("AVswitches");
-
-        if (avClean)
+        else
         {
-            exchangeFluidHalos_(domain, get<"dV11", "dV12", "dV13", "dV22", "dV23", "dV33", "prho", "alpha">(d));
+            //! @brief zero-fluid rank: leave groups_ in a well-defined empty state
+            //!
+            //! integrate's h update consumes groups_.view() unconditionally; a stale (previous
+            //! iteration) or never-built groups_ would feed indeterminate group ranges into
+            //! updateSmoothingLength (GroupData members are uninitialized PODs). numGroups = 0
+            //! makes the GPU h-update launcher a no-op (numBlocks == 0 early return in
+            //! updateSmoothingLengthGpu) and, with firstBody == lastBody == 0, the CPU path an
+            //! empty loop.
+            groups_.firstBody  = 0;
+            groups_.lastBody   = 0;
+            groups_.numGroups  = 0;
+            groups_.groupStart = nullptr;
+            groups_.groupEnd   = nullptr;
+            d.minDtRho = rhoTimestep(fluidFirst, fluidLast, d); //! empty fluid range -> +inf (M2b guard)
         }
-        else { exchangeFluidHalos_(domain, get<"prho", "alpha">(d)); }
-        timer.step("fluidHaloExchange");
-
-        if (!iadTrioRequested_)
-        {
-            release(d, "divv", "gradh");
-            acquire(d, "ay", "az");
-        }
-        computeMomentumEnergy<avClean>(groups_.view(), nullptr, d, domain.box());
-        timer.step("MomentumAndEnergy");
-        pmReader.step();
 
         //! @brief step 9: restore the full SFC layout before gravity (a full-layout routine)
         unpartition_(domain, simData);
         timer.step("partitionRestore");
+
+        //! @brief step 10: zero the non-fluid owned accelerations before gravity
+        //!
+        //! Gravity accumulates into ax/ay/az, and phase 7 wrote fluid accelerations only, so the
+        //! non-fluid owned slots hold sync/halo-exchange scratch garbage (ax is also the exchange
+        //! send buffer). Unconditional, so non-fluid accelerations are well-defined even with
+        //! g == 0 (the drift consumes them for all particles). Non-fluid halo accelerations stay
+        //! garbage — never read. Gravity itself keeps the full-buffer view (correct for mixed
+        //! populations, layout.back() == bufSize); no nFluid gating here.
+        size_t first = domain.startIndex();
+        size_t last  = domain.endIndex();
+        cstone::fillMasked(domain.exec(), cstone::rawPtr(d.ax) + first, cstone::rawPtr(d.ax) + last,
+                           cstone::rawPtr(d.ptype) + first, HydroType(0));
+        cstone::fillMasked(domain.exec(), cstone::rawPtr(d.ay) + first, cstone::rawPtr(d.ay) + last,
+                           cstone::rawPtr(d.ptype) + first, HydroType(0));
+        cstone::fillMasked(domain.exec(), cstone::rawPtr(d.az) + first, cstone::rawPtr(d.az) + last,
+                           cstone::rawPtr(d.ptype) + first, HydroType(0));
 
         if (d.g != 0.0)
         {
@@ -375,15 +439,50 @@ public:
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 
+        //! @brief step 1: global timestep over the owned range in the full SFC layout
+        //!
+        //! Halos are excluded: their ax/ay/az are stale (phase 7 wrote owned fluid accelerations
+        //! only; non-fluid halos are never written) and would poison the min-reduce, while
+        //! minDtCourant/minDtRho were computed over fluid only in computeForces.
         computeTimestep(first, last, d);
         timer.step("Timestep");
-        computePositions(groups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)});
+
+        //! @brief step 2: KDK position update of all owned particles in the full SFC layout
+        //!
+        //! Type-agnostic: non-fluid particles drift on their gravity accelerations. The phase-7
+        //! groups_ are only valid in the compacted layout, so the drift runs on driftGroups_
+        //! (built above from the full d.treeView; trivial owned-range group on CPU). The energy
+        //! update is masked per particle to the fluid class. No data dependency with the h update
+        //! in step 3 (the drift uses h only for the FBC correction) — but the layouts differ, so
+        //! the h update must not be reordered before the drift.
+        computeGroups(first, last, d, domain.box(), driftGroups_);
+        computePositions(driftGroups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)}, nullptr,
+                         cstone::rawPtr(d.ptype));
+        timer.step("UpdateQuantities");
+
+        //! @brief step 3: fluid-only h update in the compacted layout
+        //!
+        //! Re-applies the cached ordering_ (per-step cache from this step's computeForces step 4;
+        //! no sync in between): fluid owned particles are only contiguous in the compacted layout.
+        //! Runs on the phase-7 fluid groups, still under the same ordering_, with nothing rebuilt
+        //! in between. removeKey markings land in the permuted keys — the restore is a gather,
+        //! not a key sort.
+        applyPartition_(domain, simData);
         bool haveUnconvergedParticles = updateSmoothingLength(groups_.view(), d);
-        if (haveUnconvergedParticles && not d.removeUnconvergedParticles)
+        if (haveUnconvergedParticles)
         {
+            //! v1: unconverged fluid particles always throw (the removal flag is rejected in sync())
             throw std::runtime_error("Neighbor search did not converge\n");
         }
-        timer.step("UpdateQuantities");
+        timer.step("partition");
+
+        //! @brief step 4: restore the full SFC layout for the next sync
+        //!
+        //! Same fixed gather list + flag-gated trio call as step 3, now carrying the h/keys
+        //! updated there. Precondition: no resize between syncs; the next sync resizes to the new
+        //! count, so ordering_/orderingInv_ are never reused across a sync.
+        unpartition_(domain, simData);
+        timer.step("partitionRestore");
     }
 
     void saveFields(IFileWriter* writer, size_t first, size_t last, DataType& simData,
@@ -510,9 +609,9 @@ private:
 
     //! @brief step 4: fused stable partition + application of the ordering to the full gather set
     //!
-    //! One of the exactly four per-step layout transitions (steps 4/9 here, integrate 3/4 in M3);
-    //! all of them go through partition_/unpartition_. Never hand a fluid index to a full-layout
-    //! routine (esp. rhoTimestep, gravity, output) or vice versa.
+    //! One of the exactly four per-step layout transitions (computeForces steps 4/9, integrate
+    //! steps 3/4); all of them go through partition_/unpartition_/applyPartition_. Never hand a
+    //! fluid index to a full-layout routine (esp. rhoTimestep, gravity, output) or vice versa.
     void partition_(DomainType& domain, DataType& simData, size_t nFluid)
     {
         auto&  d       = simData.hydro;
@@ -527,6 +626,22 @@ private:
         cstone::stablePartition(domain.exec(), cstone::rawPtr(d.ptype), bufSize, nFluid, cstone::rawPtr(ordering_),
                                 cstone::rawPtr(orderingInv_),
                                 reinterpret_cast<unsigned*>(cstone::rawPtr(partitionScratch_)));
+
+        applyPartition_(domain, simData);
+    }
+
+    //! @brief apply the cached ordering_ to the fixed gather set (+ flag-gated trio call)
+    //!
+    //! Used by computeForces step 4 (after stablePartition fills the caches) and by integrate
+    //! step 3, which re-applies the per-step cache — valid because no sync happened since
+    //! computeForces step 4. The ordering must match the buffer size: a resize between syncs
+    //! invalidates it (the next sync resizes to the new count).
+    void applyPartition_(DomainType& domain, DataType& simData)
+    {
+        auto&  d       = simData.hydro;
+        size_t bufSize = domain.nParticlesWithHalos();
+
+        if (ordering_.size() != bufSize) { throw std::runtime_error("ve-pt: partition ordering size mismatch\n"); }
 
         applyPermutation_(domain.exec(), {cstone::rawPtr(ordering_), bufSize}, fixedGatherList(simData));
         if (iadTrioRequested_)

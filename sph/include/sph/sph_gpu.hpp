@@ -83,8 +83,8 @@ extern void driftPositionsGpu(const GroupView& grp, float dt, float dt_back,
 template<class Tc, class Tv, class Ta, class Tdu, class Tm1, class Tu, class Thydro>
 extern void computePositionsGpu(const GroupView& grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1, Tc* x,
                                 Tc* y, Tc* z, Tv* vx, Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay,
-                                Ta* az, const uint8_t* rung, Tu* temp, Tu* u, Tdu* du, Tm1* du_m1, Thydro* h,
-                                Thydro* mui, Tc gamma, Tc constCv, const cstone::Box<Tc>& box);
+                                Ta* az, const uint8_t* rung, const uint8_t* ptype, Tu* temp, Tu* u, Tdu* du, Tm1* du_m1,
+                                Thydro* h, Thydro* mui, Tc gamma, Tc constCv, const cstone::Box<Tc>& box);
 
 template<class T>
 extern void groupDivvTimestepGpu(float Krho, const GroupView&, const T* divv, float* groupDt);

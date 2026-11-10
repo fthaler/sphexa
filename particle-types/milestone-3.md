@@ -253,6 +253,20 @@ mis-values halo masses) and the default output set (requesting
 divergences). `compare_develop.py` cannot drive the gate (rtol diff, no exit
 code) — use the h5py check.
 
+**Amended 2026-11-10 (user decision, option 1):** the GPU build is not bitwise-reproducible
+run-to-run (`ve` vs `ve`, same binary, back-to-back `-n 50 -s 10 -w 1` runs: v/x differ from
+iteration 1 — v maxabs ~6e-11, x ~4e-15, temp/du_m1/alpha/h/id/m bitwise-identical at step 0;
+energy fields join from step 1 via the AV velocity dependence; x snowballs to ~1.7e-13 by step
+8; h bitwise-equal throughout). The seed is in the ax path with the momentum kernel exonerated
+by clean step-0 du/temp — GPU gravity traversal the prime suspect; pre-existing (gravity
+untouched by M3). The gate criterion is therefore re-specified as a **tolerance gate**: same
+two-run command and structure checks (same step groups; ve-pt = ve ∪ {ptype}; `ptype` all
+zero), with integer datasets (`id`) bitwise-exact and floating-point datasets
+maxabs ≤ **1e-6** — `check_gate.py --tolerance 1e-6`. Calibration (measured noise, step 10,
+-n 50): x/y/z ~1.7e-13, v ~3.5e-10, alpha 4.5e-8, du_m1 1.9e-9, temp 7e-20, h/id/m bitwise 0 —
+≥20× margin; valid for the -n 50 10-step evrard configuration, revisit for longer runs. The
+CPU bitwise gate remains exact and is the primary correctness check.
+
 ### 2. Mixed smoke run — 30% non-fluid
 
 ```

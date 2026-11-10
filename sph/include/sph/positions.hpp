@@ -136,8 +136,15 @@ void updatePositionsHost(size_t startIndex, size_t endIndex, Dataset& d, const c
     }
 }
 
+//! @brief non-fluid particles (ptype != 0) do not take part in the energy update
+HOST_DEVICE_FUN constexpr bool energyUpdateEnabled(const uint8_t* ptype, size_t i)
+{
+    return ptype == nullptr || ptype[i] == 0;
+}
+
 template<class Dataset, class T>
-void updateTempHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone::Box<T>& box)
+void updateTempHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone::Box<T>& box,
+                    const uint8_t* ptype)
 {
     bool anyFBC = box.boundaryX() == cstone::BoundaryType::fixed || box.boundaryY() == cstone::BoundaryType::fixed ||
                   box.boundaryZ() == cstone::BoundaryType::fixed;
@@ -149,6 +156,7 @@ void updateTempHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone
 #pragma omp parallel for schedule(static)
     for (std::size_t i = startIndex; i < endIndex; i++)
     {
+        if (!energyUpdateEnabled(ptype, i)) { continue; }
         if (anyFBC) { adjustForFBC = min(fbcAdjustFactors({d.x[i], d.y[i], d.z[i]}, box, d.h[i])); }
         auto cv    = haveMui ? idealGasCv(d.mui[i], d.gamma) : constCv;
         auto u_old = cv * d.temp[i];
@@ -160,7 +168,8 @@ void updateTempHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone
 }
 
 template<class Dataset, class T>
-void updateIntEnergyHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone::Box<T>& box)
+void updateIntEnergyHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone::Box<T>& box,
+                         const uint8_t* ptype)
 {
     bool anyFBC = box.boundaryX() == cstone::BoundaryType::fixed || box.boundaryY() == cstone::BoundaryType::fixed ||
                   box.boundaryZ() == cstone::BoundaryType::fixed;
@@ -170,6 +179,7 @@ void updateIntEnergyHost(size_t startIndex, size_t endIndex, Dataset& d, const c
 #pragma omp parallel for schedule(static)
     for (std::size_t i = startIndex; i < endIndex; i++)
     {
+        if (!energyUpdateEnabled(ptype, i)) { continue; }
         if (anyFBC) { adjustForFBC = min(fbcAdjustFactors({d.x[i], d.y[i], d.z[i]}, box, d.h[i])); }
         // notice the common factor of dt in energyUpdate: to apply the Fixed Boundary Correction we can do it on dt.
         // we multiply dt_m1 by that factor so it applies only once to each of the updating terms
@@ -203,9 +213,16 @@ void driftPositions(const GroupView& grp, Dataset& d, float dt_forward, float dt
     }
 }
 
+/*! @brief drift all particles to the end of the time step (KDK position update)
+ *
+ * @param ptype  particle class per particle: 0 = fluid, non-zero = gravity-only; nullptr treats
+ *               every particle as fluid. Gates the energy update: it reads garbage du/du_m1 for
+ *               non-fluid particles and would corrupt temp/u and du_m1.
+ */
 template<class T, class Dataset>
 void computePositions(const GroupView& grp, Dataset& d, const cstone::Box<T>& box, float dt_forward,
-                      util::array<float, Timestep::maxNumRungs> dt_m1, const uint8_t* rung = nullptr)
+                      util::array<float, Timestep::maxNumRungs> dt_m1, const uint8_t* rung = nullptr,
+                      const uint8_t* ptype = nullptr)
 {
     if constexpr (d.useGpu)
     {
@@ -214,15 +231,15 @@ void computePositions(const GroupView& grp, Dataset& d, const cstone::Box<T>& bo
 
         computePositionsGpu(grp, dt_forward, dt_m1, rawPtr(d.x), rawPtr(d.y), rawPtr(d.z), rawPtr(d.vx), rawPtr(d.vy),
                             rawPtr(d.vz), rawPtr(d.x_m1), rawPtr(d.y_m1), rawPtr(d.z_m1), rawPtr(d.ax), rawPtr(d.ay),
-                            rawPtr(d.az), rung, rawPtr(d.temp), rawPtr(d.u), rawPtr(d.du), rawPtr(d.du_m1), rawPtr(d.h),
-                            d_mui, d.gamma, constCv, box);
+                            rawPtr(d.az), rung, ptype, rawPtr(d.temp), rawPtr(d.u), rawPtr(d.du), rawPtr(d.du_m1),
+                            rawPtr(d.h), d_mui, d.gamma, constCv, box);
     }
     else
     {
         updatePositionsHost(grp.firstBody, grp.lastBody, d, box);
 
-        if (!d.temp.empty()) { updateTempHost(grp.firstBody, grp.lastBody, d, box); }
-        else if (!d.u.empty()) { updateIntEnergyHost(grp.firstBody, grp.lastBody, d, box); }
+        if (!d.temp.empty()) { updateTempHost(grp.firstBody, grp.lastBody, d, box, ptype); }
+        else if (!d.u.empty()) { updateIntEnergyHost(grp.firstBody, grp.lastBody, d, box, ptype); }
     }
 }
 

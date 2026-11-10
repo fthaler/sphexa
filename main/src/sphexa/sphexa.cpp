@@ -113,6 +113,7 @@ int main(int argc, char** argv)
     std::string              profFile             = parser.get("-op", std::string("profile"));
     const bool               disableNeighborLists = parser.exists("--disable-neighbor-lists");
     const double             nonFluidFrac         = parser.get("--nonfluid-frac", 0.0);
+    const bool               nonFluidContiguous   = parser.exists("--nonfluid-contiguous");
 
     std::ofstream nullOutput("/dev/null");
     std::ostream& output = (quiet || rank) ? nullOutput : std::cout;
@@ -142,7 +143,7 @@ int main(int argc, char** argv)
 
     //! @brief interim mixed-IC mechanism (M2): mark a fraction of the ICs non-fluid (fresh ICs only),
     //! before the first sync which stamps halo ptype and computes the fluid layout
-    if (nonFluidFrac > 0.0) { markNonFluidFraction(d, nonFluidFrac); }
+    if (nonFluidFrac > 0.0) { markNonFluidFraction(d, nonFluidFrac, nonFluidContiguous); }
 
     if (disableNeighborLists) d.disableNeighborLists();
 
@@ -311,6 +312,9 @@ void printHelp(char* name, int rank)
                 \t for finding particle-particle interactions\n\n");
 
         printf("\t--nonfluid-frac F \t Mark fraction F of the initial particles as non-fluid (gravity-only).\n\
-                \t Fresh ICs only, [0:0.5]. [default 0]\n\n");
+                \t Fresh ICs only, [0:0.5], or [0:1] with --nonfluid-contiguous. [default 0]\n\n");
+
+        printf("\t--nonfluid-contiguous \t Use contiguous selection (ids < F*Ntotal) with --nonfluid-frac instead\n\
+                \t of the spread rule; can empty a rank. Temporary test-only option.\n\n");
     }
 }

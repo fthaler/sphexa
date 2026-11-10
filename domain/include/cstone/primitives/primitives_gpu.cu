@@ -14,6 +14,7 @@
  */
 
 #include <cassert>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -185,6 +186,8 @@ gatherScatter(execution::Gpu, const int*, const int*, size_t, const util::array<
 template<class T>
 std::tuple<T, T> minMax(execution::Gpu exec, const T* first, const T* last)
 {
+    if (first == last) return {std::numeric_limits<T>::max(), std::numeric_limits<T>::lowest()};
+
     auto minMaxElements = thrust::minmax_element(thrustExecPolicy(exec), first, last);
 
     T theMinimum, theMaximum;

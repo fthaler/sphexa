@@ -171,23 +171,27 @@ void initFieldsAtRest(Dataset& d, double m_part)
 
 /*! @brief interim mixed-IC mechanism: mark a fraction of the particles non-fluid, fresh ICs only
  *
- * The selection is a function of the particle id only (rank-count independent): every stride-th
- * global id is marked non-fluid, with stride = round(1/frac). The id % stride rule spreads the
- * marked particles over the whole domain — unlike id < f*N, which for glass ICs (where id follows
- * the global SFC order) would select one spatially contiguous corner chunk. The rule only realizes
- * fractions of the form 1/stride: frac > 0.5 is rejected (stride would round to 1, marking every
- * particle), and very small fractions may undershoot to zero marked particles.
+ * Default selection (contiguous = false): a function of the particle id only (rank-count independent):
+ * every stride-th global id is marked non-fluid, with stride = round(1/frac). The id % stride rule
+ * spreads the marked particles over the whole domain — unlike id < f*N, which for glass ICs (where id
+ * follows the global SFC order) would select one spatially contiguous corner chunk. The rule only
+ * realizes fractions of the form 1/stride: frac > 0.5 is rejected (stride would round to 1, marking
+ * every particle), and very small fractions may undershoot to zero marked particles.
+ *
+ * Contiguous selection (contiguous = true): marks exactly the ids < F * Ntotal (F = frac, Ntotal =
+ * global particle count). For glass ICs this empties a rank entirely — temporary test-only variant
+ * for the zero-fluid-rank config (b); never used for production mixed runs.
  *
  * Fresh ICs only: ptype must be all-zero before marking (a ptype-bearing restart stores the mark
  * already). GPU mechanics: generateParticleIDs is host-MPI code, so ids are copied D2H, the
  * selection runs on the host and ptype is uploaded H2D — no kernels, no new .cu (host TU).
  */
 template<class Dataset>
-void markNonFluidFraction(Dataset& d, double frac)
+void markNonFluidFraction(Dataset& d, double frac, bool contiguous = false)
 {
     if (frac < 0.0 || frac > 1.0) { throw std::runtime_error("nonfluid fraction must be in [0:1]\n"); }
     if (frac == 0.0) { return; }
-    if (frac > 0.5)
+    if (frac > 0.5 && not contiguous)
     {
         throw std::runtime_error("nonfluid fraction > 0.5: the id % stride rule cannot realize it "
                                  "(stride rounds to 1, i.e. every particle marked)\n");
@@ -214,10 +218,28 @@ void markNonFluidFraction(Dataset& d, double frac)
                                  "a ptype-bearing restart already stores the mark)\n");
     }
 
-    uint64_t stride = 1.0 / frac + 0.5;
-    for (size_t i = 0; i < localCount; ++i)
+    if (contiguous)
     {
-        if (idHost[i] % stride == 0) { ptypeHost[i] = 1; }
+        // Ntotal via the same host Allgather as generateParticleIDs; id < F*Ntotal (round-to-nearest)
+        int                   numRanks = 0;
+        MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
+        std::vector<uint64_t> ranksLocalParticles(numRanks);
+        MPI_Allgather(&localCount, 1, MpiType<uint64_t>{}, ranksLocalParticles.data(), 1, MpiType<uint64_t>{},
+                      MPI_COMM_WORLD);
+        uint64_t globalCount = std::accumulate(ranksLocalParticles.begin(), ranksLocalParticles.end(), uint64_t(0));
+        uint64_t markCount   = frac * globalCount + 0.5;
+        for (size_t i = 0; i < localCount; ++i)
+        {
+            if (idHost[i] < markCount) { ptypeHost[i] = 1; }
+        }
+    }
+    else
+    {
+        uint64_t stride = 1.0 / frac + 0.5;
+        for (size_t i = 0; i < localCount; ++i)
+        {
+            if (idHost[i] % stride == 0) { ptypeHost[i] = 1; }
+        }
     }
 
     //! @brief the marked non-fluid h keeps its IC value (gravity softening) and feeds egrav and

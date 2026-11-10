@@ -89,9 +89,12 @@ void computeMomentumEnergy(const GroupView& grp, float* groupDt, Dataset& d,
     checkGpuErrors(
         cudaMemcpyToSymbolAsync(GPU_SYMBOL(minDt_ve_device), &minDt, sizeof(minDt), 0, cudaMemcpyHostToDevice, 0));
 
-    constexpr LocalIndex threads = 256;
-    const LocalIndex     blocks  = cstone::iceil(grp.numGroups, threads / GpuConfig::warpSize);
-    reduceDt<<<blocks, threads>>>(grp.groupStart, grp.groupEnd, grp.numGroups, rawPtr(d.dtCourant), groupDt);
+    if (grp.numGroups > 0)
+    {
+        constexpr LocalIndex threads = 256;
+        const LocalIndex     blocks  = cstone::iceil(grp.numGroups, threads / GpuConfig::warpSize);
+        reduceDt<<<blocks, threads>>>(grp.groupStart, grp.groupEnd, grp.numGroups, rawPtr(d.dtCourant), groupDt);
+    }
 
     checkGpuErrors(cudaMemcpyFromSymbol(&minDt, GPU_SYMBOL(minDt_ve_device), sizeof(minDt)));
     d.minDtCourant = minDt;

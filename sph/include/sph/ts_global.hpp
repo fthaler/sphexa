@@ -74,6 +74,9 @@ auto accelerationTimestep(size_t first, size_t last, const Dataset& d)
 template<class Dataset>
 auto rhoTimestep(size_t first, size_t last, const Dataset& d)
 {
+    // zero-fluid rank: +inf is the identity for the caller's min-reduce
+    if (last <= first) return std::numeric_limits<typename Dataset::RealType>::infinity();
+
     using T = std::decay_t<decltype(*d.divv.data())>;
 
     T maxDivv = -INFINITY;

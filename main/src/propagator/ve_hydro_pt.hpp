@@ -37,6 +37,13 @@
  * exactly four layout transitions per step (computeForces steps 4/9, integrate steps 3/4), all via
  * the partition_/unpartition_ helper pair.
  *
+ * v1 limitations (see the "Particle types" section of CONTEXT.md): configurations relying on
+ * h-growth to give a fluid particle its first two fluid neighbors are unsupported — updateSmoothingLength
+ * reports them unconverged and ve-pt v1 throws "Neighbor search did not converge" instead of removing
+ * particles. SPH quantities of non-fluid particles (prho, divv, xm, nc, dtCourant, fluid-only -f
+ * fields) are stale/undefined in dumps: they are computed on the fluid range only; the default output
+ * set holds only finite values and shared observables are not ptype-filtered.
+ *
  * @author Sebastian Keller <sebastian.f.keller@gmail.com>
  */
 
@@ -266,10 +273,10 @@ public:
         cstone::computeFluidLayout(domain.exec(), domain.layout(), cstone::rawPtr(d.ptype), fluidLayoutAcc_,
                                    fluidLayoutHost_, d.getAllocGrowthRate());
         size_t nFluid = fluidLayoutHost_.back();
-        timer.step("fluidLayout");
 
         size_t fluidFirst = fluidLayoutHost_[domain.startCell()];
         size_t fluidLast  = fluidLayoutHost_[domain.endCell()];
+        timer.step("fluidLayout");
 
         //! @brief step 3: fluid halo request exchange, in the fluid-compacted index space realized
         //! by step 4's partition
@@ -288,6 +295,8 @@ public:
         fluidHalos_->exchangeRequests(domain.focusTree().treeLeaves(), domain.focusTree().assignment(),
                                       fluidLayoutHost_);
         assertFluidHalosConsistent(simData, fluidFirst, fluidLast, nFluid);
+        //! the request exchange is part of the fluidHaloExchange region (steps 3/7 share the name)
+        timer.step("fluidHaloExchange");
 
         //! @brief step 4: partition into the fluid-compacted layout
         partition_(domain, simData, nFluid);

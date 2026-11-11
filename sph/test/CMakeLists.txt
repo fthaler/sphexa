@@ -5,6 +5,7 @@ set(UNIT_TESTS
         positions.cpp
         std.cpp
         table_creation.cpp
+        timestep.cpp
         ve.cpp
 )
 
@@ -36,6 +37,10 @@ if (SPH_EXA_WITH_CUDA OR SPH_EXA_WITH_HIP)
 
     target_include_directories(${testname} PRIVATE ${CSTONE_DIR} ${PROJECT_SOURCE_DIR}/include)
     target_link_libraries(${testname} PRIVATE sph_gpu GTest::gtest_main)
+    # the timestep guard tests use cstone GPU primitives (minMax, DeviceVector)
+    if (TARGET cstone_gpu)
+        target_link_libraries(${testname} PRIVATE cstone_gpu)
+    endif ()
     add_test(NAME ${testname} COMMAND ${testname})
 
     install(TARGETS ${testname} RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}/hydro)

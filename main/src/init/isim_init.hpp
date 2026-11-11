@@ -39,6 +39,7 @@
 #include "sphexa/simulation_data.hpp"
 
 #include "settings.hpp"
+#include "utils.hpp"
 #include "io/id_tag_utils.hpp"
 
 namespace sphexa
@@ -53,11 +54,20 @@ public:
     {
     }
 
+    //! @brief set the per-init non-fluid fraction option, applied in init() after initImpl and runTagging;
+    //! a frac <= 0 disables the option (see markNonFluidFraction)
+    void setNonFluidFraction(double frac, bool contiguous)
+    {
+        nonFluidFrac_       = frac;
+        nonFluidContiguous_ = contiguous;
+    }
+
     cstone::Box<typename Dataset::RealType> init(int rank, int numRanks, size_t cbrtNumPart, Dataset& d,
                                                  IFileReader* reader) const
     {
         auto box = initImpl(rank, numRanks, cbrtNumPart, d, reader);
         runTagging(reader, d);
+        applyNonFluidFraction(d);
         return box;
     }
 
@@ -71,6 +81,25 @@ protected:
 
 private:
     std::string settingsFile_;
+
+    double nonFluidFrac_       = 0.0;
+    bool   nonFluidContiguous_ = false;
+
+    //! @brief apply the per-init non-fluid fraction option (no-op for frac <= 0)
+    void applyNonFluidFraction(Dataset& simData) const
+    {
+        // the CLI value overrides the settings; on restarts, FileInit reads the input file's size-1 file
+        // attributes into constants() (readFileAttributes), so a fraction persisted by the fresh run
+        // (writeSettings with the nonFluidFracKey extra setting) is re-applied automatically. Marking is
+        // idempotent (see markNonFluidFraction).
+        double frac = nonFluidFrac_;
+        if (frac <= 0.0)
+        {
+            auto it = constants().find(nonFluidFracKey);
+            if (it != constants().end()) { frac = it->second; }
+        }
+        if (frac > 0.0) { markNonFluidFraction(simData.hydro, frac, nonFluidContiguous_); }
+    }
 
     void runTagging(IFileReader* reader, Dataset& simData) const
     {

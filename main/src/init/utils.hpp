@@ -169,7 +169,7 @@ void initFieldsAtRest(Dataset& d, double m_part)
     generateParticleIDs(d.exec, d.id);
 }
 
-/*! @brief interim mixed-IC mechanism: mark a fraction of the particles non-fluid, fresh ICs only
+/*! @brief mixed-IC mechanism: mark a fraction of the particles non-fluid (per-init option)
  *
  * Default selection (contiguous = false): a function of the particle id only (rank-count independent):
  * every stride-th global id is marked non-fluid, with stride = round(1/frac). The id % stride rule
@@ -182,9 +182,13 @@ void initFieldsAtRest(Dataset& d, double m_part)
  * global particle count). For glass ICs this empties a rank entirely — temporary test-only variant
  * for the zero-fluid-rank config (b); never used for production mixed runs.
  *
- * Fresh ICs only: ptype must be all-zero before marking (a ptype-bearing restart stores the mark
- * already). GPU mechanics: generateParticleIDs is host-MPI code, so ids are copied D2H, the
- * selection runs on the host and ptype is uploaded H2D — no kernels, no new .cu (host TU).
+ * Idempotent: the selection is a pure function of the particle id, so re-marking an already-marked
+ * dataset with the same fraction re-marks the same ids (marks are only ever set, never cleared). A
+ * ptype-bearing restart re-marks the same ids; a restart from a ptype-less dump zero-fills ptype first
+ * (restoreDataset), then marks. Re-marking with a DIFFERENT fraction unions the marks (particles marked
+ * under either rule stay non-fluid) — documented, not guarded. GPU mechanics: generateParticleIDs is
+ * host-MPI code, so ids are copied D2H, the selection runs on the host and ptype is uploaded H2D — no
+ * kernels, no new .cu (host TU).
  */
 template<class Dataset>
 void markNonFluidFraction(Dataset& d, double frac, bool contiguous = false)
@@ -210,12 +214,6 @@ void markNonFluidFraction(Dataset& d, double frac, bool contiguous = false)
     {
         std::copy(d.id.begin(), d.id.end(), idHost.begin());
         std::copy(d.ptype.begin(), d.ptype.end(), ptypeHost.begin());
-    }
-
-    if (std::any_of(ptypeHost.begin(), ptypeHost.end(), [](uint8_t p) { return p != 0; }))
-    {
-        throw std::runtime_error("markNonFluidFraction: ptype is not all-zero (fresh ICs only; "
-                                 "a ptype-bearing restart already stores the mark)\n");
     }
 
     if (contiguous)

@@ -347,6 +347,13 @@ public:
         else { throw std::runtime_error("Cannot read file attributes: file not opened\n"); }
     }
 
+    std::vector<std::string> datasetNames() override
+    {
+        // the dataset names of the current step view; must be called between setStep and closeStep
+        if (h5File_) { return fileutils::datasetNames(h5File_); }
+        else { throw std::runtime_error("Cannot read datasets: file not opened\n"); }
+    }
+
     int64_t fileAttributeSize(const std::string& key) override
     {
         int64_t   attrIndex = fileAttributeIndex(key);

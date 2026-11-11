@@ -45,16 +45,29 @@ using InitSettings = std::map<std::string, double>;
 inline constexpr std::array idTagFsStrings = {"id_selection_spheres", "id_selection_spheres_group_ids",
                                               "id_selection_list", "id_selection_list_group_ids"};
 
+//! @brief the InitSettings key of the per-init non-fluid fraction option, written as a file attribute so
+//! it travels with the IC into dumps and is re-applied automatically on restart
+inline constexpr const char* nonFluidFracKey = "nonfluid_frac";
+
 //! @brief write @p InitSettings as file attributes of a new file @p path
-inline void writeSettings(const InitSettings& settings, const std::string& path, IFileWriter* writer)
+//!
+//! @p extra is merged into the written attributes, winning on key collision.
+inline void writeSettings(const InitSettings& settings, const std::string& path, IFileWriter* writer,
+                          const InitSettings& extra = {})
 {
     if (std::filesystem::exists(path))
     {
         throw std::runtime_error("Cannot write settings: file " + path + " already exists\n");
     }
 
+    InitSettings merged(settings);
+    for (const auto& kv : extra)
+    {
+        merged[kv.first] = kv.second;
+    }
+
     writer->addStep(0, 0, path);
-    for (auto it = settings.cbegin(); it != settings.cend(); ++it)
+    for (auto it = merged.cbegin(); it != merged.cend(); ++it)
     {
         writer->fileAttribute(it->first, &(it->second), 1);
     }

@@ -163,21 +163,40 @@ read all-zero and the run must complete. Depends on item 1.
 
 ## Verification / acceptance
 
-**Gate 1 — item 3 (restart bitwise equality).** Both runs with the **same rank count**:
+ **Gate 1 — item 3 (restart bitwise equality).** Both runs with the **same rank count**:
 
 ```bash
 sphexa --prop ve-pt --init evrard --glass ./50c.h5 -n 50 -s 10 -w 5 -o mixed.h5 --nonfluid-frac 0.3
-sphexa --prop ve-pt --init mixed.h5:0 -s 10 -w 5 -o rest.h5
+sphexa --prop ve-pt --init mixed.h5:0 -s 20 -w 5 -o rest.h5
 ```
 
 (`-w` is required — without it no dump is ever written, `sphexa.cpp:106-107,179-183`. Use the proper
-per-init option once item 2 lands; the M2 flag drives the same id-keyed rule, so the gate is identical.)
+per-init option once item 2 lands; the M2 flag drives the same id-keyed rule, so the gate is identical.
+**Amended 2026-11-10:** the restart's `-s` must exceed the dump's iteration — `-s N` is an absolute
+iteration cap (`stopConditionReached`, `sphexa.cpp:235-241`), so `-s 10` from the iteration-5 dump
+works, but the same command pattern applied to a dump already AT iteration N completes without ever
+dumping. Gate 1's restart runs 5→10 and dumps at 10.)
 h5py assertions: each snapshot carries an `iteration` attribute; `mixed.h5:0` = file-step index 0
 (`factory.hpp:115-118`). Take `rest.h5`'s **last** snapshot, read its `iteration` `k`, locate the
 `mixed.h5` snapshot with the same `iteration == k` (identity via the dumped `iteration` attribute, not
-positional index), and assert **every** dataset in the two snapshots — **including `ptype`** — is
-`np.array_equal` (bitwise); `iteration`/`ttot`/`minDt`/`minDt_m1` are the restored values
-(`particles_data.hpp:186-193`).
+positional index), and assert every dataset in the two snapshots — **including `ptype`** — matches;
+`iteration`/`ttot`/`minDt`/`minDt_m1` are the restored values (`particles_data.hpp:186-193`).
+
+**Amended 2026-11-10 (user decision, option 1):** the equality criterion is re-specified as a
+**tolerance gate**, because bitwise snapshot equality across a restart is unattainable for *any*
+propagator: the dump@k state is post-`computeForces(k)`, and `computeAVswitches` updates `alpha`
+in-place with an accumulating relaxation (`alpha_i += alphadot * dt` toward a divv-derived target,
+`av_switches_kern.hpp:108-122`) — the restart's re-executed `computeForces(k)` applies the step-k
+relaxation a second time. Verified pre-existing upstream: a plain-ve restart pair (no ve-pt code)
+reproduces the identical structure (alpha 421/65494 particles, maxabs 2.2e-4 after 10 steps). The
+milestone's original bitwise argument covered the ij-loop outputs (`du`/`gradP`/`dt`) and integrate's
+v-kick/u-update but missed the in-place AV switch; everything else in `computeForces` is idempotent on
+the dump state (the h update is a fixed point). Criterion: `id`/`m`/`h`/`ptype` bitwise-exact;
+`x/y/z/x_m1/y_m1/z_m1`, `vx/vy/vz`, `temp`, `du_m1` with maxabs ≤ 1e-6; `alpha` with maxabs ≤ 1e-3
+(bound of one extra relaxation step; observed 1.1e-4 at 5 steps, 2.2e-4 at 10 steps on plain ve).
+Agent-verified 2026-11-10 (1 rank, release CPU, `/tmp/vept-m4/check_restart.c` — h5cc tool, no h5py on
+the dev host): ptype/h/id/m bitwise; worst x 2.5e-13, v 5.8e-10, temp 1.1e-19, du_m1 1.9e-9, alpha
+1.08e-4 — passes.
 
 **Gate 2 — item 4 (old dump restart).** Reuse (or produce) a plain ve dump — no `ptype` dataset:
 

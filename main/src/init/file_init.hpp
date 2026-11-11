@@ -31,6 +31,10 @@
 
 #pragma once
 
+#include <algorithm>
+#include <string_view>
+#include <type_traits>
+
 #include "cstone/primitives/primitives_acc.hpp"
 #include "cstone/sfc/box.hpp"
 
@@ -40,6 +44,17 @@
 namespace sphexa
 {
 
+//! @brief detect a ptype member (ParticlesData has one; e.g. ChemistryData does not)
+template<class Dataset, class = void>
+struct HasPtype : std::false_type
+{
+};
+
+template<class Dataset>
+struct HasPtype<Dataset, std::void_t<decltype(std::declval<Dataset&>().ptype)>> : std::true_type
+{
+};
+
 template<class Dataset>
 void restoreDataset(IFileReader* reader, Dataset& d)
 {
@@ -47,18 +62,38 @@ void restoreDataset(IFileReader* reader, Dataset& d)
     d.resize(reader->localNumParticles());
 
     auto fieldPointers = d.data();
+    //! @brief dataset names of the current step view; queried between setStep and closeStep
+    auto datasetNames = reader->datasetNames();
     for (size_t i = 0; i < fieldPointers.size(); ++i)
     {
         if (d.isConserved(i))
         {
+            std::string datasetName = Dataset::prefix + d.fieldNames[i];
+            //! @brief a missing conserved dataset is only tolerated for ptype (dumps from before the
+            //! ptype field existed): it is defaulted to all-fluid. The decision is rank-consistent:
+            //! every rank runs the same datasetNames() query against the same file. Any other missing
+            //! conserved field is a hard error.
+            if (std::find(datasetNames.begin(), datasetNames.end(), datasetName) == datasetNames.end())
+            {
+                if constexpr (HasPtype<Dataset>::value)
+                {
+                    if (std::string_view(d.fieldNames[i]) == "ptype")
+                    {
+                        if (reader->rank() == 0) { std::cout << "ptype not in file, zero-filled" << std::endl; }
+                        cstone::fill(d.exec, d.ptype.begin(), d.ptype.end(), 0);
+                        continue;
+                    }
+                }
+                throw std::runtime_error("Dataset '" + datasetName + "' not found in input file\n");
+            }
             if (reader->rank() == 0) { std::cout << "restoring " << d.fieldNames[i]; }
             auto t0 = std::chrono::high_resolution_clock::now();
             std::visit(
-                [reader, key = d.fieldNames[i]](auto field)
+                [reader, &datasetName](auto field)
                 {
                     using T = std::remove_reference<decltype(*field->data())>::type;
                     std::vector<T> tmp(field->size());
-                    reader->readField(Dataset::prefix + key, tmp.data());
+                    reader->readField(datasetName, tmp.data());
                     *field = std::move(tmp);
                 },
                 fieldPointers[i]);

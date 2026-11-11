@@ -126,6 +126,10 @@ int main(int argc, char** argv)
     auto propagator  = propagatorFactory<Domain, Dataset>(propChoice, avClean, output, rank, simInit->constants());
     auto observables = observablesFactory<Dataset>(simInit->constants(), constantsFile);
 
+    //! @brief per-init mixed-IC option: applied inside simInit->init() after initImpl and runTagging, before
+    //! the first sync which stamps halo ptype and computes the fluid layout
+    simInit->setNonFluidFraction(nonFluidFrac, nonFluidContiguous);
+
     Dataset simData;
     simData.comm = MPI_COMM_WORLD;
 
@@ -141,10 +145,6 @@ int main(int argc, char** argv)
     auto& d = simData.hydro;
     simData.setOutputFields(outputFields.empty() ? propagator->conservedFields() : outputFields);
 
-    //! @brief interim mixed-IC mechanism (M2): mark a fraction of the ICs non-fluid (fresh ICs only),
-    //! before the first sync which stamps halo ptype and computes the fluid layout
-    if (nonFluidFrac > 0.0) { markNonFluidFraction(d, nonFluidFrac, nonFluidContiguous); }
-
     if (disableNeighborLists) d.disableNeighborLists();
 
     if (parser.exists("--G")) { d.g = parser.get<double>("--G"); }
@@ -152,7 +152,14 @@ int main(int argc, char** argv)
     float theta    = parser.get("--theta", haveGrav ? 0.5f : 1.0f);
 
     if (!parser.exists("-o")) { outFile += fileWriter->suffix(); }
-    if (writeEnabled) { writeSettings(simInit->constants(), outFile, fileWriter.get()); }
+    if (writeEnabled)
+    {
+        //! @brief persist the non-fluid fraction option with the IC: travels into the dump's file attributes
+        //! and is re-applied automatically on restart (marking is idempotent)
+        InitSettings extra;
+        if (nonFluidFrac > 0.0) { extra[nonFluidFracKey] = nonFluidFrac; }
+        writeSettings(simInit->constants(), outFile, fileWriter.get(), extra);
+    }
     if (rank == 0) { std::cout << "Data generated for " << d.numParticlesGlobal << " global particles\n"; }
 
     uint64_t bucketSizeFocus = 64;
@@ -311,8 +318,10 @@ void printHelp(char* name, int rank)
         printf("\t--disable-neighbor-lists \t Disable neighbor lists and instead always traverse the full octree\n\
                 \t for finding particle-particle interactions\n\n");
 
-        printf("\t--nonfluid-frac F \t Mark fraction F of the initial particles as non-fluid (gravity-only).\n\
-                \t Fresh ICs only, [0:0.5], or [0:1] with --nonfluid-contiguous. [default 0]\n\n");
+        printf("\t--nonfluid-frac F \t Mark fraction F of the particles as non-fluid (gravity-only).\n\
+                \t Per-init option, idempotent on restarts: a ptype-bearing restart re-marks the same ids,\n\
+                \t restarts from dumps without ptype mark from scratch; the value is persisted with the IC.\n\
+                \t [0:0.5], or [0:1] with --nonfluid-contiguous. [default 0]\n\n");
 
         printf("\t--nonfluid-contiguous \t Use contiguous selection (ids < F*Ntotal) with --nonfluid-frac instead\n\
                 \t of the spread rule; can empty a rank. Temporary test-only option.\n\n");

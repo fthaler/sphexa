@@ -92,6 +92,7 @@ public:
     virtual void                     setStep(std::string path, int step, FileMode mode)                 = 0;
     virtual std::vector<std::string> fileAttributes()                                                   = 0;
     virtual std::vector<std::string> stepAttributes()                                                   = 0;
+    virtual std::vector<std::string> datasetNames()                                                     = 0;
     virtual int64_t                  fileAttributeSize(const std::string& key)                          = 0;
     virtual int64_t                  stepAttributeSize(const std::string& key)                          = 0;
     virtual void                     fileAttribute(const std::string& key, FieldType val, int64_t size) = 0;
@@ -116,6 +117,11 @@ public:
         return {};
     }
     std::vector<std::string> stepAttributes() override
+    {
+        throwError();
+        return {};
+    }
+    std::vector<std::string> datasetNames() override
     {
         throwError();
         return {};

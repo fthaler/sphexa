@@ -127,6 +127,7 @@ struct GpuSuperclusterNbListNeighborhood
     Subgroup subgroup(GroupView const& groups) const
     {
         static_assert(!Config::symmetric, "subgroup only supported in non-symmetric neighborhoods");
+        if (firstBody == lastBody) return {*this, groups, {}, {}, 0};
         const LocalIndex firstISupercluster = superclusterIndex<Config>(firstBody);
         const LocalIndex lastISupercluster  = superclusterIndex<Config>(lastBody - 1) + 1;
         const LocalIndex numISuperclusters  = lastISupercluster - firstISupercluster;
@@ -273,7 +274,7 @@ struct GpuSuperclusterNbListNeighborhoodBuilder
     {
         using namespace gpu_supercluster_nb_list_neighborhood_detail;
 
-        if (totalBodies == 0) return {};
+        if (totalBodies == 0 || groups.firstBody == groups.lastBody) return {};
 
         // align particle indices to cluster boundaries: insert invalid particles at the beginning of the particle
         // array, to make sure particle with index firstBody is the first particle of a supercluster

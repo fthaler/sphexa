@@ -369,9 +369,16 @@ void zeroFluidRankPartitionGpu(int rank, int numRanks)
         DeviceVector<LocalIndex> numSplitsPerGroup;
         float                    tolFactor = 2.0f;
         cstone::Box<T>           box{0, 1};
+        //! the device-side dispatch (traversal/groups_gpu.cu) accepts exactly warpSize and 2 * warpSize,
+        //! with the nvcc-compiled warpSize = 32. GpuConfig::warpSize seen from this host TU has no
+        //! __CUDACC__ and evaluates to 64, so 2 * GpuConfig::warpSize would hand 128 to the dispatcher
+        //! and throw "Unsupported spatial group size". Pass the accepted 64 (= 2 * 32) explicitly. This
+        //! is not the SPH production group size, which is sph::nsGroupSize() == warpSize == 32
+        //! (hydro_ve/xmass_gpu.cu); 64 is the size ryoanji's gravity groups use (TravConfig::targetSize).
+        constexpr unsigned groupSize = 64;
         computeGroupSplits(stream.exec(), fluidFirst, fluidLast, rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h),
-                           rawPtr(d_leaves), numLeaves, rawPtr(fluidLayoutAcc), box, 2 * GpuConfig::warpSize,
-                           tolFactor, numSplitsPerGroup, groups.data);
+                           rawPtr(d_leaves), numLeaves, rawPtr(fluidLayoutAcc), box, groupSize, tolFactor,
+                           numSplitsPerGroup, groups.data);
         stream.sync();
     }
     groups.firstBody  = fluidFirst;

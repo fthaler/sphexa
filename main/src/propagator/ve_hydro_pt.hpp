@@ -37,10 +37,20 @@
  * exactly four layout transitions per step (computeForces steps 4/9, integrate steps 3/4), all via
  * the partition_/unpartition_ helper pair.
  *
- * v1 limitations (see the "Particle types" section of CONTEXT.md): configurations relying on
- * h-growth to give a fluid particle its first two fluid neighbors are unsupported — updateSmoothingLength
- * reports them unconverged and ve-pt v1 throws "Neighbor search did not converge" instead of removing
- * particles. SPH quantities of non-fluid particles (prho, divv, xm, nc, dtCourant, fluid-only -f
+ * Unconverged fluid particles (nc <= 1 after the h update, where the self-inclusive nc makes this
+ * "no fluid neighbor") are removed at the next sync when removeUnconvergedParticles is set — the
+ * flag arrives via the IC file attribute (ve parity, no CLI flag). Marking happens only in
+ * updateSmoothingLength over the owned-fluid compacted range: gravity particles (ptype != 0) are
+ * never marked and never removed (debug-checked by assertRemoveMarksFluidOnly_). Without the flag,
+ * unconverged particles throw "Neighbor search did not converge" as in ve. Dumps never contain
+ * doomed particles: marking happens in integrate step 3, removal in the sync of the next
+ * computeForces, and the driver's only dump site lies between a post-removal computeForces and
+ * integrate (main/src/sphexa/sphexa.cpp), i.e. outside that window. A driver that dumped inside it
+ * would write the doomed particles, and since keys are not dumped, a restart of such a dump would
+ * recompute keys from the positions and resurrect them (identical to ve). Conserved totals
+ * (mass/energy) intentionally drop while removals occur.
+ *
+ * SPH quantities of non-fluid particles (prho, divv, xm, nc, dtCourant, fluid-only -f
  * fields) are stale/undefined in dumps: they are computed on the fluid range only; the default output
  * set holds only finite values and shared observables are not ptype-filtered.
  *
@@ -132,6 +142,10 @@ protected:
     //! @brief step-8 trigger flag (run-constant): divv/curlv/gradh are requested outputs
     bool iadTrioRequested_{false};
 
+    //! @brief integrate step 3 marked particles for removal; the next sync drops them and then has to
+    //! sanitize the halo keys (see clearHaloRemovalMarks_)
+    bool removalPending_{false};
+
     /*! @brief the list of conserved particles fields with values preserved between iterations
      *
      * x, y, z, h and m are automatically considered conserved and must not be specified in this list.
@@ -186,14 +200,11 @@ public:
     void sync(DomainType& domain, DataType& simData) override
     {
         auto& d = simData.hydro;
-        //! @brief ve-pt v1: removal of unconverged particles is unsupported
+        //! @brief removal of unconverged fluid particles (opt-in via the IC file attribute)
         //!
-        //! The flag arrives via file attribute (also on restart); rejecting at the first sync
-        //! keeps it a startup error instead of a mid-run behavior change.
-        if (d.removeUnconvergedParticles)
-        {
-            throw std::runtime_error("ve-pt: removeUnconvergedParticles is unsupported in ve-pt v1\n");
-        }
+        //! With the flag set, particles marked for removal in the previous integrate step 3
+        //! (keys == removeKey) are dropped here and the conserved arrays shrink. Without the flag,
+        //! unconverged particles throw in integrate step 3.
         if (d.g != 0.0)
         {
             domain.syncGrav(get<"keys">(d), get<"x">(d), get<"y">(d), get<"z">(d), get<"h">(d), get<"m">(d),
@@ -204,6 +215,17 @@ public:
             domain.sync(get<"keys">(d), get<"x">(d), get<"y">(d), get<"z">(d), get<"h">(d),
                         std::tuple_cat(std::tie(get<"m">(d)), get<ConservedFields>(d)), get<DependentFields>(d));
         }
+
+        //! @brief the removal sync compacts the marks out of the owned range but can leave one in a
+        //! halo slot: the halo keys are re-derived from positions by domain::setupHalos through
+        //! computeSfcKeys, which preserves removeKey by design (that preservation is what carries the
+        //! marks from integrate into this sync for owned particles)
+        if (removalPending_)
+        {
+            clearHaloRemovalMarks_(domain, simData);
+            removalPending_ = false;
+        }
+
         d.treeView = domain.octreeProperties();
 
         //! @brief lazily construct the fluid halo helper on the first sync
@@ -536,14 +558,19 @@ public:
         //! Re-applies the cached ordering_ (per-step cache from this step's computeForces step 4;
         //! no sync in between): fluid owned particles are only contiguous in the compacted layout.
         //! Runs on the phase-7 fluid groups, still under the same ordering_, with nothing rebuilt
-        //! in between. removeKey markings land in the permuted keys — the restore is a gather,
-        //! not a key sort.
+        //! in between. removeKey markings land in the permuted keys — they survive the step-4
+        //! gather (a gather, never a key sort) and are removed at the next sync when
+        //! removeUnconvergedParticles is set; without the flag, unconverged particles throw.
         applyPartition_(domain, simData);
         bool haveUnconvergedParticles = updateSmoothingLength(groups_.view(), d);
         if (haveUnconvergedParticles)
         {
-            //! v1: unconverged fluid particles always throw (the removal flag is rejected in sync())
-            throw std::runtime_error("Neighbor search did not converge\n");
+            assertRemoveMarksFluidOnly_(domain, simData);
+            if (not d.removeUnconvergedParticles)
+            {
+                throw std::runtime_error("Neighbor search did not converge\n");
+            }
+            removalPending_ = true;
         }
         timer.step("partition");
 
@@ -821,6 +848,74 @@ private:
         }
         assert((covered == nFluid || (covered == fluidFirst && fluidLast == nFluid)) &&
                "ve-pt: fluid halo incoming ranges do not tile the halo fluid slots");
+#endif
+    }
+
+    /*! @brief drop removeKey marks that landed in the halo slots of the removal sync
+     *
+     * domain::sync drops the particles carrying removeKey and compacts the owned range, but the halo
+     * keys are re-derived from the delivered coordinates by setupHalos through computeSfcKeys, which
+     * deliberately skips removal keys (that skip is what carries the marks of owned particles from
+     * integrate into the sync). A dropped particle's slot can therefore end up in the new halo range
+     * with its mark intact, i.e. as a live mark in a non-owned slot: it trips the debug guard
+     * assertRemoveMarksFluidOnly_ (which asserts zero marks outside the owned-fluid range) and leaves
+     * the halo keys inconsistent with their positions.
+     *
+     * Recompute the halo keys from the coordinates after zeroing the range: computeSfcKeys skips slots
+     * that already hold a removal key, so the mark has to be gone before the recompute. Cost is one
+     * pass over the halo range, and this only runs on removal steps (removalPending_).
+     */
+    void clearHaloRemovalMarks_(const DomainType& domain, DataType& simData)
+    {
+        auto& d = simData.hydro;
+
+        //! buffer index space: the halo slots are [endIndex, nParticlesWithHalos)
+        size_t first = domain.endIndex();
+        size_t last  = domain.nParticlesWithHalos();
+        if (first >= last) { return; }
+
+        cstone::fill(domain.exec(), cstone::rawPtr(d.keys) + first, cstone::rawPtr(d.keys) + last, KeyType(0));
+        cstone::computeSfcKeys(domain.exec(), cstone::rawPtr(d.x) + first, cstone::rawPtr(d.y) + first,
+                               cstone::rawPtr(d.z) + first, cstone::sfcKindPointer(cstone::rawPtr(d.keys)) + first,
+                               last - first, domain.box());
+    }
+
+    /*! @brief debug-only stray-mark guard for the unconverged-particle removal path
+     *
+     * Runs in integrate step 3 when updateSmoothingLength reported unconverged particles (the only
+     * marking site): removeKey may appear only in the owned-fluid compacted range
+     * [fluidFirst:fluidLast) of the permuted keys. A mark anywhere else would mean a gravity
+     * particle (ptype != 0) or a halo slot got marked — a regression that would silently drop the
+     * wrong particle class at the next sync. Counting is restricted to the two non-owned ranges
+     * [0:fluidFirst) + [fluidLast:bufSize); marks in the owned-fluid range are the expected state.
+     *
+     * Asserts (aborts the rank) rather than throws, like assertFluidHalosConsistent: a thrown,
+     * caught violation would hang the peers at the next collective.
+     */
+    void assertRemoveMarksFluidOnly_([[maybe_unused]] const DomainType& domain,
+                                     [[maybe_unused]] const DataType&   simData) const
+    {
+#ifndef NDEBUG
+        const auto& d       = simData.hydro;
+        size_t      bufSize = domain.nParticlesWithHalos();
+
+        size_t fluidFirst = fluidLayoutHost_[domain.startCell()];
+        size_t fluidLast  = fluidLayoutHost_[domain.endCell()];
+
+        const KeyType* keys        = cstone::rawPtr(d.keys);
+        KeyType        markedValue = cstone::removeKey<KeyType>{};
+        size_t         strayMarks  = 0;
+        if constexpr (cstone::execution::HaveGpu<Acc>{})
+        {
+            strayMarks += cstone::count(domain.exec(), keys, keys + fluidFirst, markedValue);
+            strayMarks += cstone::count(domain.exec(), keys + fluidLast, keys + bufSize, markedValue);
+        }
+        else
+        {
+            strayMarks += std::count(keys, keys + fluidFirst, markedValue);
+            strayMarks += std::count(keys + fluidLast, keys + bufSize, markedValue);
+        }
+        assert(strayMarks == 0 && "ve-pt: non-fluid or halo particle marked for removal");
 #endif
     }
 };

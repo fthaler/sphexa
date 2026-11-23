@@ -173,9 +173,17 @@ symmetry, pass-3 drop) in **M2**. `integrate` steps 1-4 → **M3**.
   `d.neighborhood` or `groups_` must only run in the layout it was built in.
 - Zero-fluid ranks: group machinery naturally safe; exceptions needing their
   own guards: `reduceDt` and `rhoTimestep` (M2b). M2b/M4 cover CPU and GPU.
-- `removeUnconvergedParticles`: v1 = startup error if flag set + unconditional
-  throw on unconverged particles (M3).
-- Fluid particles with `nc <= 1`: documented unsupported in v1 (M4).
+- `removeUnconvergedParticles`: opt-in via the IC file attribute (ve parity, no CLI flag). With
+  the flag set, unconverged **fluid** particles (`nc <= 1` after the capped h update, where
+  self-inclusive `nc` means "no fluid neighbor") are removed at the next sync (M5): marks survive
+  the gather-restore, the removal is cstone-standard
+  (marked keys sort beyond the tree cover and are dropped by `domain.sync`/`syncGrav`). Without
+  the flag, unconverged particles throw as in ve. Gravity particles are never marked/removed
+  (marking is confined to the owned-fluid compacted range; debug guard in the propagator).
+- Fluid particles with `nc <= 1`: supported via the removal flag (M5); without the flag the
+  throw is unchanged. ve-parity nuances: dumps between marking and removal still carry the
+  doomed particles (a restart from one resurrects them — keys are recomputed from positions),
+  and conserved totals intentionally drop while removals occur.
 - SPH quantities of non-fluid particles are stale/undefined in v1 for
   fluid-only `-f` outputs; default output set holds only finite values.
   `ptype`-filtering of shared observables is a follow-up (do not filter in v1

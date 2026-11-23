@@ -199,9 +199,9 @@ step 2) — added alongside `groups_` (`ve_hydro.hpp:67` idiom).
    `ve_hydro.hpp:215-218` analog with ve's
    `&& not d.removeUnconvergedParticles` clause dropped:
    `if (haveUnconvergedParticles) throw std::runtime_error("Neighbor search did not converge\n");`
-   (`updateSmoothingLength` reports unconverged for fluid particles with at
-   most one fluid neighbor, `find_neighbors.hpp:26-35` — the `nc <= 1` case,
-   documented unsupported in v1).
+   (`updateSmoothingLength` reports unconverged for fluid particles with no
+   fluid neighbor — `nc <= 1` with self-inclusive `nc` (`nc = 1 + neighbors`),
+   `find_neighbors.hpp:26-35` — documented unsupported in v1).
 2. **Config**: flag set → **startup error "unsupported in ve-pt v1"**,
    checked at the **first `sync()`** (the flag arrives via file attribute,
    `particles_data.hpp:190`).

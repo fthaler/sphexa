@@ -216,7 +216,7 @@ the option set re-marks idempotently (`ptype` unchanged bitwise vs the dump).
 
 ## Risks & gotchas
 
-- **`nc <= 1` (at most one fluid neighbor)**: `updateSmoothingLength` reports such particles unconverged
+- **`nc <= 1` (no fluid neighbor; `nc` is self-inclusive, `nc = 1 + neighbors`)**: `updateSmoothingLength` reports such particles unconverged
   directly (`sph/include/sph/find_neighbors.hpp:26-35`) → the hard "Neighbor search did not converge"
   throw (`ve_hydro.hpp:215-218`). The fluid halo set was fixed by the full sync — **no amount of h-growth
   can conjure missing fluid neighbors**. The init option makes the ≥ 2-fluid-neighbors precondition

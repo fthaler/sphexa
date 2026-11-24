@@ -482,8 +482,8 @@ __global__ void stablePartitionKernel(const uint8_t* ptype,
     LocalIndex tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < n)
     {
-        LocalIndex dest = (ptype[tid] == 0) ? tid - nonFluidScan[tid] : nFluid + nonFluidScan[tid];
-        ordering[dest]  = tid;
+        LocalIndex dest  = (ptype[tid] == 0) ? tid - nonFluidScan[tid] : nFluid + nonFluidScan[tid];
+        ordering[dest]   = tid;
         orderingInv[tid] = dest;
     }
 }
@@ -505,8 +505,8 @@ void stablePartition(execution::Gpu exec,
     stablePartitionKernel<<<numBlocks, numThreads, 0, exec>>>(ptype, n, nFluid, workspace, ordering, orderingInv);
 }
 
-__global__ void fluidLeafCountsKernel(const LocalIndex* layout, TreeNodeIndex numLeafNodes, const uint8_t* ptype,
-                                      unsigned* counts)
+__global__ void
+fluidLeafCountsKernel(const LocalIndex* layout, TreeNodeIndex numLeafNodes, const uint8_t* ptype, unsigned* counts)
 {
     TreeNodeIndex tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < numLeafNodes)
@@ -518,10 +518,7 @@ __global__ void fluidLeafCountsKernel(const LocalIndex* layout, TreeNodeIndex nu
         }
         counts[tid] = count;
     }
-    else if (tid == numLeafNodes)
-    {
-        counts[numLeafNodes] = 0;
-    }
+    else if (tid == numLeafNodes) { counts[numLeafNodes] = 0; }
 }
 
 //! @brief computeFluidLayout for GPU buffers, see the CPU version in primitives_acc.hpp for the contract

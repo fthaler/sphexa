@@ -143,8 +143,7 @@ HOST_DEVICE_FUN constexpr bool energyUpdateEnabled(const uint8_t* ptype, size_t 
 }
 
 template<class Dataset, class T>
-void updateTempHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone::Box<T>& box,
-                    const uint8_t* ptype)
+void updateTempHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone::Box<T>& box, const uint8_t* ptype)
 {
     bool anyFBC = box.boundaryX() == cstone::BoundaryType::fixed || box.boundaryY() == cstone::BoundaryType::fixed ||
                   box.boundaryZ() == cstone::BoundaryType::fixed;

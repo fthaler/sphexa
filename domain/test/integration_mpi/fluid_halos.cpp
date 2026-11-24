@@ -42,8 +42,13 @@ using namespace cstone;
 constexpr int numGlobal = 12;
 
 template<class T>
-void initGlobal(std::vector<T>& x, std::vector<T>& y, std::vector<T>& z, std::vector<T>& h,
-                std::vector<uint8_t>& ptype, std::vector<T>& m, std::vector<T>& vx)
+void initGlobal(std::vector<T>& x,
+                std::vector<T>& y,
+                std::vector<T>& z,
+                std::vector<T>& h,
+                std::vector<uint8_t>& ptype,
+                std::vector<T>& m,
+                std::vector<T>& vx)
 {
     x     = {0.0, 0.11, 0.261, 0.281, 0.301, 0.321, 0.521, 0.541, 0.561, 0.761, 0.781, 1.000};
     y     = {0.0, 0.12, 0.262, 0.282, 0.302, 0.322, 0.522, 0.542, 0.562, 0.762, 0.781, 1.000};
@@ -66,9 +71,16 @@ std::size_t globalIndex(T x, const std::vector<T>& xGlobal)
 //! owned *fluid* particles only: vx probes the fluid-only halo exchange, so non-fluid slots (owned
 //! and halo) keep the -1 sentinel, matching particles by (unique) x; halo slots are left untouched
 template<class T>
-void fillOwned(std::vector<uint8_t>& ptype, std::vector<T>& m, std::vector<T>& vx, const std::vector<T>& x,
-               LocalIndex start, LocalIndex end, const std::vector<T>& xGlobal, const std::vector<uint8_t>& ptypeGlobal,
-               const std::vector<T>& mGlobal, const std::vector<T>& vxGlobal)
+void fillOwned(std::vector<uint8_t>& ptype,
+               std::vector<T>& m,
+               std::vector<T>& vx,
+               const std::vector<T>& x,
+               LocalIndex start,
+               LocalIndex end,
+               const std::vector<T>& xGlobal,
+               const std::vector<uint8_t>& ptypeGlobal,
+               const std::vector<T>& mGlobal,
+               const std::vector<T>& vxGlobal)
 {
     for (LocalIndex i = start; i < end; ++i)
     {
@@ -83,9 +95,13 @@ void fillOwned(std::vector<uint8_t>& ptype, std::vector<T>& m, std::vector<T>& v
 //! @brief check ptype/m per particle and vx for fluid particles against the global set, identifying
 //! particles by (unique) x; non-fluid vx slots legitimately keep the -1 sentinel (never exchanged)
 template<class T>
-void checkAgainstGlobal(const std::vector<T>& x, const std::vector<uint8_t>& ptype, const std::vector<T>& m,
-                        const std::vector<T>& vx, const std::vector<T>& xGlobal,
-                        const std::vector<uint8_t>& ptypeGlobal, const std::vector<T>& mGlobal,
+void checkAgainstGlobal(const std::vector<T>& x,
+                        const std::vector<uint8_t>& ptype,
+                        const std::vector<T>& m,
+                        const std::vector<T>& vx,
+                        const std::vector<T>& xGlobal,
+                        const std::vector<uint8_t>& ptypeGlobal,
+                        const std::vector<T>& mGlobal,
                         const std::vector<T>& vxGlobal)
 {
     for (std::size_t i = 0; i < x.size(); ++i)
@@ -163,7 +179,7 @@ void fluidRoundTripCpu(int rank, int numRanks)
     computeFluidLayout(execution::cpu, domain.layout(), ptype.data(), fluidLayoutAcc, fluidLayoutHost, 1.05);
 
     std::span<const LocalIndex> layout = domain.layout();
-    TreeNodeIndex     numLeaves        = TreeNodeIndex(layout.size()) - 1;
+    TreeNodeIndex numLeaves            = TreeNodeIndex(layout.size()) - 1;
     ASSERT_EQ(fluidLayoutHost.size(), std::size_t(numLeaves) + 1);
     LocalIndex fluidCount = 0;
     for (TreeNodeIndex i = 0; i < numLeaves; ++i)
@@ -194,7 +210,7 @@ void fluidRoundTripCpu(int rank, int numRanks)
 
     // step 4: fused stable partition + gather of the conserved set
     std::vector<LocalIndex> ordering(bufSize), orderingInv(bufSize);
-    std::vector<uint64_t>   partitionScratch(bufSize);
+    std::vector<uint64_t> partitionScratch(bufSize);
     stablePartition(execution::cpu, ptype.data(), bufSize, nFluid, ordering.data(), orderingInv.data(),
                     reinterpret_cast<unsigned*>(partitionScratch.data()));
     for (LocalIndex j = 0; j < nFluid; ++j)
@@ -202,7 +218,7 @@ void fluidRoundTripCpu(int rank, int numRanks)
         ASSERT_EQ(ptype[ordering[j]], 0) << "compacted slot " << j;
     }
 
-    std::vector<T>       x0 = x, y0 = y, z0 = z, h0 = h, m0 = m;
+    std::vector<T> x0 = x, y0 = y, z0 = z, h0 = h, m0 = m;
     std::vector<uint8_t> ptype0 = ptype;
     std::vector<KeyType> keys0  = keys;
 
@@ -269,7 +285,7 @@ void fluidRoundTripCpu(int rank, int numRanks)
 template<class KeyType, class T>
 void zeroFluidRankRequests(int rank, int numRanks)
 {
-    std::vector<KeyType>      leaves{0, 2, 4, 6, 8, 10, 12, 14, 16};
+    std::vector<KeyType> leaves{0, 2, 4, 6, 8, 10, 12, 14, 16};
     std::vector<TreeIndexPair> assignment(numRanks);
     assignment[0] = TreeIndexPair(0, 4);
     assignment[1] = TreeIndexPair(4, 8);
@@ -278,8 +294,8 @@ void zeroFluidRankRequests(int rank, int numRanks)
     // halo leaf 3; every present leaf holds 2 particles
     std::vector<LocalIndex> layout0{0, 2, 4, 6, 8, 10, 10, 10, 10};
     std::vector<LocalIndex> layout1{0, 0, 0, 0, 2, 4, 6, 8, 10};
-    std::span<const LocalIndex> layout = (rank == 0) ? std::span<const LocalIndex>{layout0}
-                                                     : std::span<const LocalIndex>{layout1};
+    std::span<const LocalIndex> layout =
+        (rank == 0) ? std::span<const LocalIndex>{layout0} : std::span<const LocalIndex>{layout1};
 
     for (int scenario = 0; scenario < 2; ++scenario)
     {
@@ -291,7 +307,7 @@ void zeroFluidRankRequests(int rank, int numRanks)
         std::vector<uint8_t> ptype0(layout0.back(), 1);
         for (TreeNodeIndex leaf = 0; leaf < 4; ++leaf)
         {
-            uint8_t p = leafFluid(leaf) ? 0 : 1;
+            uint8_t p                 = leafFluid(leaf) ? 0 : 1;
             ptype0[layout0[leaf]]     = p;
             ptype0[layout0[leaf] + 1] = p;
         }
@@ -310,7 +326,10 @@ void zeroFluidRankRequests(int rank, int numRanks)
         auto& ptype       = (rank == 0) ? ptype0 : ptype1;
         auto& fluidLayout = (rank == 0) ? fluidLayout0Host : fluidLayout1Host;
         std::vector<T> v(layout.back());
-        for (std::size_t i = 0; i < v.size(); ++i) { v[i] = (ptype[i] == 0) ? T(i) : T(-1); }
+        for (std::size_t i = 0; i < v.size(); ++i)
+        {
+            v[i] = (ptype[i] == 0) ? T(i) : T(-1);
+        }
         std::vector<T> v0 = v;
 
         Halos<KeyType> fluidHalos(rank, MPI_COMM_WORLD);
@@ -367,10 +386,7 @@ void zeroFluidRankRequests(int rank, int numRanks)
                 EXPECT_EQ(v[1], T(7));
                 EXPECT_EQ(std::vector<T>(v.begin() + 2, v.end()), std::vector<T>(v0.begin() + 2, v0.end()));
             }
-            else
-            {
-                EXPECT_EQ(v, v0);
-            }
+            else { EXPECT_EQ(v, v0); }
         }
 
         // the two request exchanges are fenced by the Alltoall inside the next exchangeRequests
@@ -450,14 +466,14 @@ void fluidRoundTripGpu(int rank, int numRanks)
     // step 2: fluid layout on the device, then D2H for the request exchange and the checks
     std::vector<LocalIndex> fluidLayoutHost;
     DeviceVector<LocalIndex> fluidLayoutAcc;
-    computeFluidLayout(execution::Gpu(stream.exec()), domain.layout(), rawPtr(d_ptype), fluidLayoutAcc,
-                       fluidLayoutHost, 1.05);
+    computeFluidLayout(execution::Gpu(stream.exec()), domain.layout(), rawPtr(d_ptype), fluidLayoutAcc, fluidLayoutHost,
+                       1.05);
 
     std::vector<LocalIndex> layoutHost(domain.layout().size());
     memcpyD2HAsync(stream.exec(), domain.layout().data(), layoutHost.size(), layoutHost.data());
     syncGpu(stream.exec());
-    std::vector<uint8_t>    ptypeHost = toHost(d_ptype);
-    TreeNodeIndex           numLeaves = TreeNodeIndex(layoutHost.size()) - 1;
+    std::vector<uint8_t> ptypeHost = toHost(d_ptype);
+    TreeNodeIndex numLeaves        = TreeNodeIndex(layoutHost.size()) - 1;
     ASSERT_EQ(fluidLayoutHost.size(), std::size_t(numLeaves) + 1);
     LocalIndex fluidCount = 0;
     for (TreeNodeIndex i = 0; i < numLeaves; ++i)
@@ -478,7 +494,7 @@ void fluidRoundTripGpu(int rank, int numRanks)
 
     // step 4: fused stable partition + gather of the conserved set
     DeviceVector<LocalIndex> d_ordering(bufSize), d_orderingInv(bufSize);
-    DeviceVector<uint64_t>   d_partitionScratch(bufSize);
+    DeviceVector<uint64_t> d_partitionScratch(bufSize);
     stablePartition(execution::Gpu(stream.exec()), rawPtr(d_ptype), bufSize, nFluid, rawPtr(d_ordering),
                     rawPtr(d_orderingInv), reinterpret_cast<unsigned*>(rawPtr(d_partitionScratch)));
 
@@ -487,9 +503,8 @@ void fluidRoundTripGpu(int rank, int numRanks)
     DeviceVector<uint8_t> d_ptype0 = d_ptype;
 
     auto gatherList = std::tie(d_keys, d_x, d_y, d_z, d_h, d_m, d_ptype, d_vx);
-    gatherArrays(execution::Gpu(stream.exec()),
-                 std::span<const LocalIndex>{rawPtr(d_ordering), std::size_t(bufSize)}, 0, gatherList,
-                 std::tie(d_partitionScratch));
+    gatherArrays(execution::Gpu(stream.exec()), std::span<const LocalIndex>{rawPtr(d_ordering), std::size_t(bufSize)},
+                 0, gatherList, std::tie(d_partitionScratch));
 
     // the fluid halo exchange delivers vx into the compacted halo fluid slots
     DeviceVector<uint64_t> d_fluidSendScratch(bufSize), d_fluidRecvScratch(bufSize);
@@ -526,7 +541,7 @@ void fluidRoundTripGpu(int rank, int numRanks)
     EXPECT_EQ(toHost(d_m), toHost(d_m0));
     EXPECT_EQ(toHost(d_ptype), toHost(d_ptype0));
     {
-        std::vector<T>    vxFinal = toHost(d_vx);
+        std::vector<T> vxFinal          = toHost(d_vx);
         std::vector<uint8_t> ptypeFinal = toHost(d_ptype);
         for (std::size_t i = 0; i < vxFinal.size(); ++i)
         {

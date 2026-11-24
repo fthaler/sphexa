@@ -566,10 +566,7 @@ public:
         if (haveUnconvergedParticles)
         {
             assertRemoveMarksFluidOnly_(domain, simData);
-            if (not d.removeUnconvergedParticles)
-            {
-                throw std::runtime_error("Neighbor search did not converge\n");
-            }
+            if (not d.removeUnconvergedParticles) { throw std::runtime_error("Neighbor search did not converge\n"); }
             removalPending_ = true;
         }
         timer.step("partition");
@@ -679,7 +676,7 @@ private:
     {
         auto& d = simData.hydro;
         return std::tuple_cat(std::tie(get<"keys">(d), get<"x">(d), get<"y">(d), get<"z">(d), get<"h">(d)),
-                                       std::tie(get<"m">(d)), get<ConservedFields>(d), get<DependentFields>(d));
+                              std::tie(get<"m">(d)), get<ConservedFields>(d), get<DependentFields>(d));
     }
 
     //! @brief release-safe application of one partition permutation to a gather set
@@ -689,8 +686,7 @@ private:
     //! a size-0 field). The scratch is addressed fresh on every call: gatherArrays may swap it with
     //! a same-type array (keys/id), so raw pointers are never cached across an apply.
     template<class... Arrays>
-    void applyPermutation_(const Acc& exec, std::span<const cstone::LocalIndex> ordering,
-                           std::tuple<Arrays&...> arrays)
+    void applyPermutation_(const Acc& exec, std::span<const cstone::LocalIndex> ordering, std::tuple<Arrays&...> arrays)
     {
         size_t bufSize = ordering.size();
         util::for_each_tuple(

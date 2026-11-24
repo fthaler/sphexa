@@ -136,7 +136,6 @@ TEST(Layout, gatherArraysShortOrdering)
     EXPECT_EQ(a, refA);
 }
 
-
 TEST(Layout, enumerateRanges)
 {
     std::vector<IndexPair<TreeNodeIndex>> ranges{{10, 13}, {30, 32}};

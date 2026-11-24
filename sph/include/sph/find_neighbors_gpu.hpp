@@ -18,4 +18,4 @@ extern bool updateSmoothingLengthGpu(const cstone::GroupView&, unsigned ng0, con
 template<class T, class Dataset>
 extern void updateSmoothingLengthIterativeGpu(const cstone::GroupView&, Dataset& d, const cstone::Box<T>& box);
 
-}
+} // namespace sph

@@ -34,8 +34,7 @@ using namespace cstone;
 constexpr int numGlobal = 12;
 
 template<class T>
-void initGlobal(std::vector<T>& x, std::vector<T>& y, std::vector<T>& z, std::vector<T>& h,
-                std::vector<uint8_t>& ptype)
+void initGlobal(std::vector<T>& x, std::vector<T>& y, std::vector<T>& z, std::vector<T>& h, std::vector<uint8_t>& ptype)
 {
     x     = {0.0, 0.11, 0.261, 0.281, 0.301, 0.321, 0.521, 0.541, 0.561, 0.761, 0.781, 1.000};
     y     = {0.0, 0.12, 0.262, 0.282, 0.302, 0.322, 0.522, 0.542, 0.562, 0.762, 0.781, 1.000};
@@ -55,8 +54,10 @@ std::size_t globalIndex(T x, const std::vector<T>& xGlobal)
 //! @brief check ptype per particle: buffer slots are SFC-ordered, so identify each particle by its
 //!       (unique) x coordinate and compare against the true global ptype
 template<class T>
-void checkPtype(const std::vector<T>& x, const std::vector<uint8_t>& ptype,
-                const std::vector<T>& xGlobal, const std::vector<uint8_t>& ptypeGlobal)
+void checkPtype(const std::vector<T>& x,
+                const std::vector<uint8_t>& ptype,
+                const std::vector<T>& xGlobal,
+                const std::vector<uint8_t>& ptypeGlobal)
 {
     ASSERT_EQ(x.size(), ptype.size());
     for (std::size_t i = 0; i < x.size(); ++i)
@@ -71,8 +72,12 @@ void checkPtype(const std::vector<T>& x, const std::vector<uint8_t>& ptype,
 //!
 //! Halo slots of @p ptype are left untouched.
 template<class T>
-void fillOwnedPtype(std::vector<uint8_t>& ptype, const std::vector<T>& x, LocalIndex start, LocalIndex end,
-                    const std::vector<T>& xGlobal, const std::vector<uint8_t>& ptypeGlobal)
+void fillOwnedPtype(std::vector<uint8_t>& ptype,
+                    const std::vector<T>& x,
+                    LocalIndex start,
+                    LocalIndex end,
+                    const std::vector<T>& xGlobal,
+                    const std::vector<uint8_t>& ptypeGlobal)
 {
     for (LocalIndex i = start; i < end; ++i)
     {

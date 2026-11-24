@@ -219,7 +219,7 @@ void markNonFluidFraction(Dataset& d, double frac, bool contiguous = false)
     if (contiguous)
     {
         // Ntotal via the same host Allgather as generateParticleIDs; id < F*Ntotal (round-to-nearest)
-        int                   numRanks = 0;
+        int numRanks = 0;
         MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
         std::vector<uint64_t> ranksLocalParticles(numRanks);
         MPI_Allgather(&localCount, 1, MpiType<uint64_t>{}, ranksLocalParticles.data(), 1, MpiType<uint64_t>{},

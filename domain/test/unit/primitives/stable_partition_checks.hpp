@@ -22,8 +22,10 @@ namespace cstone
 {
 
 //! @brief check both permutations for consistency: written everywhere, inverse of each other
-inline void checkPermutations(const std::vector<uint8_t>& ptype, const std::vector<LocalIndex>& ordering,
-                              const std::vector<LocalIndex>& orderingInv, LocalIndex nFluid)
+inline void checkPermutations(const std::vector<uint8_t>& ptype,
+                              const std::vector<LocalIndex>& ordering,
+                              const std::vector<LocalIndex>& orderingInv,
+                              LocalIndex nFluid)
 {
     LocalIndex n = LocalIndex(ptype.size());
 
@@ -42,8 +44,8 @@ inline void checkPermutations(const std::vector<uint8_t>& ptype, const std::vect
 }
 
 //! @brief check stability: fluid and non-fluid elements keep their relative order
-inline void checkStability(const std::vector<uint8_t>& ptype, const std::vector<LocalIndex>& ordering,
-                           LocalIndex nFluid)
+inline void
+checkStability(const std::vector<uint8_t>& ptype, const std::vector<LocalIndex>& ordering, LocalIndex nFluid)
 {
     LocalIndex n = LocalIndex(ptype.size());
 
@@ -54,20 +56,31 @@ inline void checkStability(const std::vector<uint8_t>& ptype, const std::vector<
         else { nonFluid.push_back(i); }
     }
 
-    for (LocalIndex j = 0; j < nFluid; ++j) { EXPECT_EQ(ordering[j], fluid[j]); }
-    for (LocalIndex j = nFluid; j < n; ++j) { EXPECT_EQ(ordering[j], nonFluid[j - nFluid]); }
+    for (LocalIndex j = 0; j < nFluid; ++j)
+    {
+        EXPECT_EQ(ordering[j], fluid[j]);
+    }
+    for (LocalIndex j = nFluid; j < n; ++j)
+    {
+        EXPECT_EQ(ordering[j], nonFluid[j - nFluid]);
+    }
 }
 
 //! @brief host-side gather verification: dst[i] == src[ordering[i]] and fluid elements land
 //!        at [0:nFluid) in original order
-inline void checkGatherResult(const std::vector<uint8_t>& ptype, const std::vector<double>& src,
-                              const std::vector<double>& dst, const std::vector<LocalIndex>& ordering,
+inline void checkGatherResult(const std::vector<uint8_t>& ptype,
+                              const std::vector<double>& src,
+                              const std::vector<double>& dst,
+                              const std::vector<LocalIndex>& ordering,
                               LocalIndex nFluid)
 {
     ASSERT_EQ(src.size(), ptype.size());
     ASSERT_EQ(dst.size(), ptype.size());
 
-    for (std::size_t i = 0; i < dst.size(); ++i) { EXPECT_EQ(dst[i], src[ordering[i]]); }
+    for (std::size_t i = 0; i < dst.size(); ++i)
+    {
+        EXPECT_EQ(dst[i], src[ordering[i]]);
+    }
 
     std::vector<double> fluidRef;
     for (std::size_t i = 0; i < src.size(); ++i)

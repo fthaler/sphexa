@@ -88,13 +88,14 @@ void checkEmptyRequests(const HalosType& fluidHalos, int numRanks)
 template<class KeyType>
 struct ZeroFluidRankSetup
 {
-    std::vector<KeyType>       leaves{0, 2, 4, 6, 8, 10, 12, 14, 16};
+    std::vector<KeyType> leaves{0, 2, 4, 6, 8, 10, 12, 14, 16};
     std::vector<TreeIndexPair> assignment;
 
     std::vector<LocalIndex> layout0{0, 2, 4, 6, 8, 10, 10, 10, 10};
     std::vector<LocalIndex> layout1{0, 0, 0, 0, 2, 4, 6, 8, 10};
 
-    explicit ZeroFluidRankSetup(int numRanks) : assignment(numRanks)
+    explicit ZeroFluidRankSetup(int numRanks)
+        : assignment(numRanks)
     {
         assignment[0] = TreeIndexPair(0, 4);
         assignment[1] = TreeIndexPair(4, 8);
@@ -117,13 +118,16 @@ void zeroFluidRankPartitionCpu(int rank, int numRanks)
     // rank 0 owns 6 fluid (leaves 0-2) and 4 non-fluid (leaf 3 + halo leaf 4); rank 1 owns zero
     // fluid and its halo leaf 3 is non-fluid, so its whole buffer is non-fluid
     std::vector<uint8_t> ptype0(bufSize, 1);
-    for (LocalIndex i = 0; i < 6; ++i) { ptype0[i] = 0; }
+    for (LocalIndex i = 0; i < 6; ++i)
+    {
+        ptype0[i] = 0;
+    }
     std::vector<uint8_t> ptype1(bufSize, 1);
     std::vector<uint8_t>& ptype = (rank == 0) ? ptype0 : ptype1;
 
     // identify particles by unique per-slot values (SFC order is fixed in the hand-built tree)
     std::vector<KeyType> keys(bufSize);
-    std::vector<T>       h(bufSize);
+    std::vector<T> h(bufSize);
     for (LocalIndex i = 0; i < bufSize; ++i)
     {
         keys[i] = 100 + KeyType(i);
@@ -164,7 +168,7 @@ void zeroFluidRankPartitionCpu(int rank, int numRanks)
     // step 4: fused stable partition + gather of a small conserved set; on rank 1 nFluid == 0, so
     // no compacted fluid slots exist and the gather only touches the non-fluid tail
     std::vector<LocalIndex> ordering(bufSize), orderingInv(bufSize);
-    std::vector<uint64_t>   partitionScratch(bufSize);
+    std::vector<uint64_t> partitionScratch(bufSize);
     stablePartition(execution::cpu, ptype.data(), bufSize, nFluid, ordering.data(), orderingInv.data(),
                     reinterpret_cast<unsigned*>(partitionScratch.data()));
     for (LocalIndex j = 0; j < nFluid; ++j)
@@ -172,8 +176,8 @@ void zeroFluidRankPartitionCpu(int rank, int numRanks)
         ASSERT_EQ(ptype[ordering[j]], 0) << "compacted slot " << j;
     }
 
-    std::vector<KeyType> keys0 = keys;
-    std::vector<T>       h0    = h;
+    std::vector<KeyType> keys0      = keys;
+    std::vector<T> h0               = h;
     std::vector<uint8_t> ptype0Save = ptype;
 
     auto gatherList = std::tie(keys, h, ptype);
@@ -258,17 +262,20 @@ void zeroFluidRankPartitionGpu(int rank, int numRanks)
     ZeroFluidRankSetup<KeyType> setup(numRanks);
 
     std::vector<LocalIndex> layoutHost = (rank == 0) ? setup.layout0 : setup.layout1;
-    LocalIndex              bufSize    = layoutHost.back();
+    LocalIndex bufSize                 = layoutHost.back();
 
     std::vector<uint8_t> ptypeInit(bufSize, 1);
     if (rank == 0)
     {
-        for (LocalIndex i = 0; i < 6; ++i) { ptypeInit[i] = 0; }
+        for (LocalIndex i = 0; i < 6; ++i)
+        {
+            ptypeInit[i] = 0;
+        }
     }
 
     // unique per-slot identifiers plus coordinates for the group split criterion
     std::vector<KeyType> keysInit(bufSize);
-    std::vector<T>       hInit(bufSize), xInit(bufSize), yInit(bufSize), zInit(bufSize);
+    std::vector<T> hInit(bufSize), xInit(bufSize), yInit(bufSize), zInit(bufSize);
     for (LocalIndex i = 0; i < bufSize; ++i)
     {
         keysInit[i] = 100 + KeyType(i);
@@ -317,24 +324,23 @@ void zeroFluidRankPartitionGpu(int rank, int numRanks)
 
     // step 4: fused stable partition + gather of a small conserved set
     DeviceVector<LocalIndex> d_ordering(bufSize), d_orderingInv(bufSize);
-    DeviceVector<uint64_t>   d_partitionScratch(bufSize);
+    DeviceVector<uint64_t> d_partitionScratch(bufSize);
     stablePartition(execution::Gpu(stream.exec()), rawPtr(d_ptype), bufSize, nFluid, rawPtr(d_ordering),
                     rawPtr(d_orderingInv), reinterpret_cast<unsigned*>(rawPtr(d_partitionScratch)));
 
-    DeviceVector<KeyType> d_keys0 = d_keys;
-    DeviceVector<T> d_h0 = d_h;
+    DeviceVector<KeyType> d_keys0  = d_keys;
+    DeviceVector<T> d_h0           = d_h;
     DeviceVector<uint8_t> d_ptype0 = d_ptype;
 
     auto gatherList = std::tie(d_keys, d_h, d_ptype);
-    gatherArrays(execution::Gpu(stream.exec()),
-                 std::span<const LocalIndex>{rawPtr(d_ordering), std::size_t(bufSize)}, 0, gatherList,
-                 std::tie(d_partitionScratch));
+    gatherArrays(execution::Gpu(stream.exec()), std::span<const LocalIndex>{rawPtr(d_ordering), std::size_t(bufSize)},
+                 0, gatherList, std::tie(d_partitionScratch));
 
     {
-        std::vector<LocalIndex> orderingHost   = toHost(d_ordering);
-        std::vector<KeyType>    keysCompacted  = toHost(d_keys);
-        std::vector<T>          hCompacted     = toHost(d_h);
-        std::vector<uint8_t>    ptypeCompacted = toHost(d_ptype);
+        std::vector<LocalIndex> orderingHost = toHost(d_ordering);
+        std::vector<KeyType> keysCompacted   = toHost(d_keys);
+        std::vector<T> hCompacted            = toHost(d_h);
+        std::vector<uint8_t> ptypeCompacted  = toHost(d_ptype);
         for (LocalIndex j = 0; j < nFluid; ++j)
         {
             LocalIndex src = orderingHost[j];
@@ -367,8 +373,8 @@ void zeroFluidRankPartitionGpu(int rank, int numRanks)
     GroupData<execution::Gpu> groups;
     {
         DeviceVector<LocalIndex> numSplitsPerGroup;
-        float                    tolFactor = 2.0f;
-        cstone::Box<T>           box{0, 1};
+        float tolFactor = 2.0f;
+        cstone::Box<T> box{0, 1};
         //! the device-side dispatch (traversal/groups_gpu.cu) accepts exactly warpSize and 2 * warpSize,
         //! with the nvcc-compiled warpSize = 32. GpuConfig::warpSize seen from this host TU has no
         //! __CUDACC__ and evaluates to 64, so 2 * GpuConfig::warpSize would hand 128 to the dispatcher
@@ -417,8 +423,8 @@ void zeroFluidRankPartitionGpu(int rank, int numRanks)
     // pending cudaErrorInvalidConfiguration surfacing at the next unrelated call. Checked
     // collectively so both ranks report.
     checkGpuErrors(cudaDeviceSynchronize());
-    cudaError_t localError  = cudaGetLastError();
-    int         localErrInt = int(localError), globalErrInt = 0;
+    cudaError_t localError = cudaGetLastError();
+    int localErrInt = int(localError), globalErrInt = 0;
     MPI_Allreduce(&localErrInt, &globalErrInt, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
     ASSERT_EQ(cudaError_t(globalErrInt), cudaSuccess) << cudaGetErrorString(cudaError_t(globalErrInt));
 }

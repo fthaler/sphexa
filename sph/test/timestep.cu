@@ -121,13 +121,12 @@ TEST(TimestepGpu, MomentumEnergyZeroGroups)
 TEST(TimestepGpu, MinMaxEmptyRange)
 {
     DeviceVector<double> empty;
-    auto [emptyMin, emptyMax] =
-        minMax(execution::gpuDefaultStream, rawPtr(empty), rawPtr(empty) + empty.size());
+    auto [emptyMin, emptyMax] = minMax(execution::gpuDefaultStream, rawPtr(empty), rawPtr(empty) + empty.size());
     EXPECT_EQ(emptyMin, std::numeric_limits<double>::max());
     EXPECT_EQ(emptyMax, std::numeric_limits<double>::lowest());
 
     DeviceVector<double> v = std::vector<double>{3.0, -1.0, 2.0};
-    auto [minV, maxV]    = minMax(execution::gpuDefaultStream, rawPtr(v), rawPtr(v) + v.size());
+    auto [minV, maxV]      = minMax(execution::gpuDefaultStream, rawPtr(v), rawPtr(v) + v.size());
     EXPECT_EQ(minV, -1.0);
     EXPECT_EQ(maxV, 3.0);
 }

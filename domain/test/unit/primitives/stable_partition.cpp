@@ -30,7 +30,10 @@ void checkGather(const std::vector<uint8_t>& ptype, const std::vector<LocalIndex
     LocalIndex n = LocalIndex(ptype.size());
 
     std::vector<double> src(n), dst(n);
-    for (LocalIndex i = 0; i < n; ++i) { src[i] = 0.5 * i; }
+    for (LocalIndex i = 0; i < n; ++i)
+    {
+        src[i] = 0.5 * i;
+    }
     gather(exec, std::span<const LocalIndex>(ordering), src.data(), dst.data());
 
     checkGatherResult(ptype, src, dst, ordering, nFluid);

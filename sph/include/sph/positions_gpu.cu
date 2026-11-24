@@ -147,8 +147,8 @@ __global__ void computePositionsKernel(GroupView grp, float dt, util::array<floa
     util::tie(x_m1[i], y_m1[i], z_m1[i]) = util::tie(X_m1[0], X_m1[1], X_m1[2]);
     util::tie(vx[i], vy[i], vz[i])       = util::tie(V[0], V[1], V[2]);
 
-    Tc minDistanceFactor = min(adjustForFBC);
-    bool energyEnabled   = energyUpdateEnabled(ptype, i);
+    Tc   minDistanceFactor = min(adjustForFBC);
+    bool energyEnabled     = energyUpdateEnabled(ptype, i);
     if (temp != nullptr && energyEnabled)
     {
         Thydro cv    = (constCv < 0) ? idealGasCv(mui[i], gamma) : constCv;
@@ -187,11 +187,11 @@ void computePositionsGpu(const GroupView& grp, float dt, util::array<float, Time
 }
 
 #define POS_GPU(Tc, Tv, Ta, Tdu, Tm1, Tt, Thydro)                                                                      \
-    template void computePositionsGpu(                                                                                 \
-        const GroupView& grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1, Tc* x, Tc* y, Tc* z, Tv* vx,  \
-        Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay, Ta* az, const uint8_t* rung,                  \
-        const uint8_t* ptype, Tt* temp, Tt* u, Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma, Tc constCv,       \
-        const cstone::Box<Tc>& box)
+    template void computePositionsGpu(const GroupView& grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1, \
+                                      Tc* x, Tc* y, Tc* z, Tv* vx, Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1,    \
+                                      Ta* ax, Ta* ay, Ta* az, const uint8_t* rung, const uint8_t* ptype, Tt* temp,     \
+                                      Tt* u, Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma, Tc constCv,        \
+                                      const cstone::Box<Tc>& box)
 
 //        Tc      Tv     Ta      Tdu     Tm1     Tt      Thydro
 POS_GPU(double, double, double, double, double, double, double);

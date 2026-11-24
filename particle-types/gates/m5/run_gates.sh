@@ -2,7 +2,7 @@
 #
 # M5 acceptance-gate driver.
 #
-#   run_gates.sh [all|G1 G2 G3 G4 G5 G6 ...] [--smoke] [--no-build]
+#   run_gates.sh [all|G2 G3 G4 G5 G6 ...] [--smoke] [--no-build]
 #                [--cpu-build DIR] [--gpu-build DIR] [--full-build DIR] [--work DIR]
 #                [--base-removal FILE] [--base-allfluid FILE]
 #                [--max-nonfluid-drop N]
@@ -18,12 +18,12 @@
 #   SPHEXA_CPU=...      CPU binary (default: $CPU_BUILD/main/src/sphexa/sphexa)
 #   SPHEXA_GPU=...      CUDA binary (default: $GPU_BUILD/main/src/sphexa/sphexa-cuda)
 #   MPICH_GPU_SUPPORT_ENABLED_CPU=0  runtime MPI GPU support for the CPU app gates
-#   MPICH_GPU_SUPPORT_ENABLED_GPU=1  runtime MPI GPU support for G1/G4/G6
+#   MPICH_GPU_SUPPORT_ENABLED_GPU=1  runtime MPI GPU support for G4/G6
 #   G6_EXCLUDE=REGEX    tests excluded from G6 (default: ^ryoanji_cpu_unit_tests$, a
 #                       pre-existing numeric failure on this host unrelated to M5;
 #                       set to '' to run the whole suite)
 #
-# G1 and G6 run GPU test binaries compiled with CSTONE_HAVE_GPU_AWARE_MPI: those
+# G4/G6 run GPU binaries compiled with CSTONE_HAVE_GPU_AWARE_MPI: those
 # hand device pointers straight to MPI_Allreduce, so they PHYSICALLY REQUIRE
 # MPICH_GPU_SUPPORT_ENABLED=1 (cray-mpich otherwise memcpys from the device
 # address and the rank segfaults inside MPIDI_Cray_shared_mem_coll_reduce).
@@ -65,8 +65,8 @@ usage()
 
 while (($#)); do
     case "$1" in
-        all) GATES+=(G1 G2 G3 G4 G5 G6) ; shift ;;
-        G1|G2|G3|G4|G5|G6) GATES+=("$1") ; shift ;;
+        all) GATES+=(G2 G3 G4 G5 G6) ; shift ;;
+        G2|G3|G4|G5|G6) GATES+=("$1") ; shift ;;
         --smoke) DO_SMOKE=1 ; shift ;;
         --no-build) DO_BUILD=0 ; shift ;;
         --cpu-build) CPU_BUILD="$2" ; shift 2 ;;
@@ -83,7 +83,7 @@ while (($#)); do
 done
 
 if ((${#GATES[@]} == 0)) && ((DO_SMOKE == 0)); then
-    GATES=(G1 G2 G3 G4 G5 G6)
+    GATES=(G2 G3 G4 G5 G6)
 fi
 
 SPHEXA_CPU="${SPHEXA_CPU:-$CPU_BUILD/main/src/sphexa/sphexa}"
@@ -91,7 +91,7 @@ SPHEXA_GPU="${SPHEXA_GPU:-$GPU_BUILD/main/src/sphexa/sphexa-cuda}"
 
 # CPU app runs on a GPU-less login node need the MPICH CUDA-GDR init out of the
 # way (the node exports MPICH_GPU_SUPPORT_ENABLED=1 by default).  This must NOT
-# be a global export: G1/G6 launch GPU binaries compiled with
+# be a global export: G4/G6 launch GPU binaries compiled with
 # CSTONE_HAVE_GPU_AWARE_MPI, which pass device pointers to MPI_Allreduce and
 # segfault inside cray-mpich when GPU support is disabled (see the header).
 CPU_MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED_CPU:-0}"
@@ -191,12 +191,6 @@ run_positive_removal()
 # ---------------------------------------------------------------------------
 # gates
 # ---------------------------------------------------------------------------
-
-gate_g1()
-{
-    env MPICH_GPU_SUPPORT_ENABLED="$GPU_MPICH_GPU_SUPPORT_ENABLED" \
-        ctest --test-dir "$GPU_BUILD" -R '^GlobalUnconvergedRemoval' --output-on-failure
-}
 
 gate_g2()
 {
@@ -391,7 +385,6 @@ main()
 
     for g in "${GATES[@]}"; do
         case "$g" in
-            G1) run_gate G1 gate_g1 ;;
             G2) require_binary "$SPHEXA_CPU" ; run_gate G2 gate_g2 ;;
             G3) require_binary "$SPHEXA_CPU" ; run_gate G3 gate_g3 ;;
             G4) require_binary "$SPHEXA_GPU" ; run_gate G4 gate_g4 ;;

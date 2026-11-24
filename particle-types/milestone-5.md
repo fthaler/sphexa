@@ -93,6 +93,14 @@ byte-identical to ve.
 
 ### 2. `domain/test/integration_mpi/unconverged_removal.cpp` (+ CMake)
 
+> Removed 2026-11-24 after M5 closure: no other propagator has an equivalent full-propagator
+> MPI test, so the harness was deleted as a one-off (see `progress.md`). M5 removal behavior
+> remains covered by the app gates G2–G5 (flag-unset throw + 2-rank removal runs). The harness
+> had 4 CPU + 4 GPU tests: `removal` and `removalGravity` (positive, plain vs gravity-sync path),
+> `noFlagThrows` (negative collective-throw check) and `allDoomed` (every fluid particle doomed →
+> zero-owned-fluid path); the gravity and all-doomed scenarios are not covered by the gates.
+> The description below is retained as the record of what the harness verified.
+
 First full-propagator MPI harness: constructs `Domain` + `RemovalSimData` (a minimal
 `SimulationData` without the cooling fields: `hydro` + `comm`) + `HydroVePtProp` directly and
 drives it in sphexa.cpp loop order (`activateFields` → sync → computeForces → integrate → sync).
@@ -150,7 +158,7 @@ CPU + GPU variants share the template functions; GPU target mirrors `zero_fluid_
   every gravity id survived with ptype preserved; doomed ids gone; cluster ids present. Exit 0/1.
 - `check_pair.c`: bitwise HDF5 comparison of two dumps (`--vept` allows the extra `ptype` dataset),
   used by G5.
-- `run_gates.sh`: the full G1–G6 command list (`all|G1..G6`), crafting the ICs into `$WORK`
+- `run_gates.sh`: the full G2–G6 command list (`all|G2..G6`), crafting the ICs into `$WORK`
   (default `build/gate-m5`, gitignored) and forcing `MPICH_GPU_SUPPORT_ENABLED` per launch. It also
   has `--smoke`: a 1-rank, no-allocation end-to-end run of the whole toolchain (negative throw,
   positive removal + `check_removal`, ve/ve-pt 20-step pair + `check_pair`) so the tooling can be
@@ -163,7 +171,7 @@ CPU + GPU variants share the template functions; GPU target mirrors `zero_fluid_
   GPU-path test segfaults inside `MPIDI_Cray_shared_mem_coll_reduce` (core backtrace:
   `__memcpy_sve` ← `MPIR_Typerep_icopy` ← `MPIR_CRAY_Allreduce` ← `updateOctreeGlobalGpu` ←
   `Domain::sync`). The override is now per launch: `0` for the CPU app gates (G2/G3/G5/smoke), `1`
-  for G1/G4/G6.
+  for G4/G6 (G1 removed 2026-11-24 with the test — see §2).
 - **G6 tree**: G6 ran `ctest --test-dir build-cpu-gate`, which only builds a subset of the test
   targets (10 reported as "Not Run"). It now uses `--full-build` (default `$GPU_BUILD`). The full
   suite also needs a ≥3-node allocation — the tests launch up to 12 ranks at
@@ -181,7 +189,7 @@ CPU + GPU variants share the template functions; GPU target mirrors `zero_fluid_
 
 | Gate | What | Command (summary) | Status |
 |---|---|---|---|
-| G1 | integration test CPU + GPU green | `run_gates.sh G1` (2 ranks, GPU-aware MPI) | **PASS** (2026-11-18, user-run) |
+| G1 | integration test CPU + GPU green | ~~`run_gates.sh G1`~~ (removed 2026-11-24 — test deleted after closure, see §2) | **PASS** (2026-11-18, user-run) |
 | G2 | negative: 2-rank CPU, flag unset → throw | `run_gates.sh G2` | **PASS** (2026-11-18, user-run; exit 134 + expected message) |
 | G3 | removal, CPU 2-rank → `check_removal` green | `run_gates.sh G3` | **PASS** (2026-11-18, user-run; 65494→65491, 3/3 doomed removed, 200/200 cluster fluid kept, 0 non-fluid drops) |
 | G4 | removal, GPU (`sphexa-cuda`) → `check_removal` green | `run_gates.sh G4` | **PASS** (2026-11-18, user-run; same report as G3) |

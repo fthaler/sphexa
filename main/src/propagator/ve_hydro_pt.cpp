@@ -26,7 +26,7 @@
 /*! @file
  * @brief Translation unit for the ve hydro propagator with particle type support initializer
  *
- * @author Sebastian Keller <sebastian.f.keller@gmail.com>
+ * @author Felix Thaler <thaler@cscs.ch>
  */
 
 #include "sph/types.hpp"

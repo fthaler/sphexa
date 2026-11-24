@@ -54,7 +54,7 @@
  * fields) are stale/undefined in dumps: they are computed on the fluid range only; the default output
  * set holds only finite values and shared observables are not ptype-filtered.
  *
- * @author Sebastian Keller <sebastian.f.keller@gmail.com>
+ * @author Felix Thaler <thaler@cscs.ch>
  */
 
 #pragma once

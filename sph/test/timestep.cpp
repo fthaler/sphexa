@@ -1,7 +1,7 @@
 /*! @file
- * @brief Tests for the CPU empty-range timestep guards (M2b hardening, M4 item 5 unit coverage)
+ * @brief Tests for the CPU empty-range timestep guards
  *
- * @author Sebastian Keller <sebastian.f.keller@gmail.com>
+ * @author Felix Thaler <thaler@cscs.ch>
  */
 
 #include "gtest/gtest.h"
@@ -16,8 +16,6 @@
 namespace sphexa
 {
 
-//! @brief M2b guard: rhoTimestep on an empty local range returns +inf before the divv availability
-//! check — a zero-fluid rank has neither owned particles nor an allocated divv buffer
 TEST(TimestepCpu, RhoTimestepEmptyRange)
 {
     ParticlesData<cstone::execution::Cpu> d;
@@ -30,7 +28,6 @@ TEST(TimestepCpu, RhoTimestepEmptyRange)
     EXPECT_NO_THROW(sph::rhoTimestep(0, 0, d));
 }
 
-//! @brief control: a non-empty range still yields the finite Krho / |max(divv)| timestep
 TEST(TimestepCpu, RhoTimestepFinite)
 {
     ParticlesData<cstone::execution::Cpu> d;
@@ -41,7 +38,6 @@ TEST(TimestepCpu, RhoTimestepFinite)
     EXPECT_NEAR(dt, d.Krho / 119, 1e-10);
 }
 
-//! @brief a non-empty range without an allocated divv buffer still throws (unchanged semantics)
 TEST(TimestepCpu, RhoTimestepThrowsWithoutDivv)
 {
     ParticlesData<cstone::execution::Cpu> d;

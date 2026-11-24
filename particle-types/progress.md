@@ -215,7 +215,7 @@ Gate tooling (agent-written, user-run): `particle-types/gates/m5/` (`removal_ic.
 - [ ] Epoch exhaustion vs `MPI_TAG_UB` (pre-existing; base `P2pTags::haloExchange = 7000`)
 - [ ] Upstream: ve saveFields pass-2 garbage `gradh` column + pass-3 OOB write (`iad_divv_curlv_gradh.hpp:49`/`_gpu.cu:48`) — consider filing
 - [ ] Upstream: restart non-idempotency of the in-place AV-switch `alpha` update (`av_switches_kern.hpp:108-122`) — any propagator: a restart re-executes computeForces(k) on the post-switch dump@k state, applying the step-k relaxation twice (alpha maxabs ~1e-4–2e-4 + ULP echoes in v/x/temp/du_m1; h/id/m unaffected). Fix = skip the switch update on the re-executed restart step (would make restarts bitwise for all propagators); found 2026-11-10 during M4 gate 1, tolerance re-spec chosen instead
-- [ ] Fluid instance tag/epoch base escalation (only if M2 MPI hygiene ever breaks)
+- [x] Fluid instance tag/epoch base escalation (only if M2 MPI hygiene ever breaks)
 
 ## Gotcha quick list (from milestone files; see each for detail)
 

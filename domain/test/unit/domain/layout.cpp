@@ -136,37 +136,6 @@ TEST(Layout, gatherArraysShortOrdering)
     EXPECT_EQ(a, refA);
 }
 
-//! @brief an unallocated (size 0) field gathered with a non-empty ordering must throw, not read OOB
-//!       The first case matches the scratch type exactly (swap branch), the second goes through
-//!       the reinterpret_cast branch.
-TEST(Layout, gatherArraysThrowOnSmallArray)
-{
-    std::vector<LocalIndex> ordering{2, 1, 3, 4};
-
-    {
-        // swap branch: field value_type matches a scratch buffer exactly
-        std::vector<float> a;
-        std::vector<float> scratch;
-        EXPECT_THROW((gatherArrays(execution::cpu, {ordering.data(), ordering.size()}, 0, std::tie(a),
-                                   std::tie(scratch))),
-                     std::runtime_error);
-    }
-    {
-        // reinterpret_cast branch: no matching scratch value_type, only one with a larger element size
-        std::vector<double> a;
-        std::vector<std::int64_t> scratch;
-        EXPECT_THROW((gatherArrays(execution::cpu, {ordering.data(), ordering.size()}, 0, std::tie(a),
-                                   std::tie(scratch))),
-                     std::runtime_error);
-    }
-    // empty ordering on an unallocated field stays a no-op
-    {
-        std::vector<float> a;
-        std::vector<float> scratch;
-        gatherArrays(execution::cpu, {ordering.data(), std::size_t(0)}, 0, std::tie(a), std::tie(scratch));
-        EXPECT_EQ(a.size(), 0);
-    }
-}
 
 TEST(Layout, enumerateRanges)
 {

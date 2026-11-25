@@ -159,38 +159,3 @@ TEST(FluidLayout, allFluidEqualsLayout)
     EXPECT_EQ(fluidLayoutHost, layout);
     EXPECT_EQ(fluidLayoutAcc, layout);
 }
-
-TEST(FillMasked, basic)
-{
-    execution::Cpu exec;
-    std::vector<double> v{1., 2., 3., 4., 5., 6.};
-    std::vector<uint8_t> mask{0, 1, 0, 0, 2, 1};
-
-    fillMasked(exec, v.begin(), v.end(), mask.begin(), -7.);
-    std::vector<double> ref{1., -7., 3., 4., -7., -7.};
-    EXPECT_EQ(v, ref);
-}
-
-TEST(FillMasked, emptyRange)
-{
-    execution::Cpu exec;
-    std::vector<double> v{1., 2., 3.};
-    std::vector<uint8_t> mask{1, 1, 1};
-
-    fillMasked(exec, v.begin(), v.begin(), mask.begin(), -7.);
-    fillMasked(exec, v.end(), v.end(), mask.end(), -7.);
-    EXPECT_EQ(v, std::vector<double>({1., 2., 3.}));
-}
-
-//! @brief mask offset must be independent of the filled range
-TEST(FillMasked, subrange)
-{
-    execution::Cpu exec;
-    std::vector<double> v{1., 2., 3., 4., 5., 6.};
-    std::vector<uint8_t> mask{0, 0, 1, 0, 1, 0};
-
-    LocalIndex first = 1, last = 5;
-    fillMasked(exec, v.begin() + first, v.begin() + last, mask.data() + first, 0.);
-    std::vector<double> ref{1., 2., 0., 4., 0., 6.};
-    EXPECT_EQ(v, ref);
-}

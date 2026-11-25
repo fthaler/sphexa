@@ -136,37 +136,3 @@ TEST(FluidLayoutGpu, allFluidEqualsLayout)
     EXPECT_EQ(fluidLayoutHost, layout);
     EXPECT_EQ(toHost(fluidLayoutAcc), layout);
 }
-
-TEST(FillMaskedGpu, basic)
-{
-    StreamHolder stream;
-    auto exec = stream.exec();
-
-    std::vector<double> v{1., 2., 3., 4., 5., 6.};
-    std::vector<uint8_t> mask{0, 1, 0, 0, 2, 1};
-
-    DeviceVector<double> d_v     = v;
-    DeviceVector<uint8_t> d_mask = mask;
-
-    fillMasked(exec, rawPtr(d_v), rawPtr(d_v) + d_v.size(), rawPtr(d_mask), -7.);
-    syncGpu(exec);
-
-    std::vector<double> ref{1., -7., 3., 4., -7., -7.};
-    EXPECT_EQ(toHost(d_v), ref);
-}
-
-TEST(FillMaskedGpu, emptyRange)
-{
-    StreamHolder stream;
-    auto exec = stream.exec();
-
-    std::vector<double> v{1., 2., 3.};
-    std::vector<uint8_t> mask{1, 1, 1};
-
-    DeviceVector<double> d_v     = v;
-    DeviceVector<uint8_t> d_mask = mask;
-
-    fillMasked(exec, rawPtr(d_v), rawPtr(d_v), rawPtr(d_mask), -7.);
-    syncGpu(exec);
-    EXPECT_EQ(toHost(d_v), std::vector<double>({1., 2., 3.}));
-}

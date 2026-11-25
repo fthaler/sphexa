@@ -109,6 +109,10 @@ write one). Then D2H into the host buffer (`memcpyD2HAsync` + `syncGpu`, staging
   pointer) so the instantiation covers `float`/`double` destinations. Wiring into step 10 is M3 — here only the
   primitive + test.
 
+> **Removed 2026-11-25:** `fillMasked` was deleted after M3 — its sole consumer (step 10) was switched to a
+> contiguous pre-`unpartition_` zero-fill of the compacted non-fluid tail `[nFluid:bufSize)`, leaving the
+> primitive as dead code. See the `progress.md` cleanup entry from that date.
+
 ### 4. `GATHER_RANGES(uint8_t, unsigned)`
 
 - `halos/gather_halos_gpu.cu:60-74`: add `GATHER_RANGES(uint8_t, unsigned)` — required for `ptype` through GPU

@@ -446,26 +446,6 @@ void selectCopy(execution::Gpu exec, const TS* src, LocalIndex n, const S* selec
 template void selectCopy(execution::Gpu, const int*, LocalIndex, const unsigned*, unsigned*);
 template void selectCopy(execution::Gpu, const unsigned*, LocalIndex, const unsigned*, unsigned*);
 
-template<class T, class M>
-__global__ void fillMaskedKernel(T* dest, size_t n, const M* mask, T value)
-{
-    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < n && mask[tid] != 0) { dest[tid] = value; }
-}
-
-template<class T, class M>
-void fillMasked(execution::Gpu exec, T* first, T* last, const M* mask, T value)
-{
-    size_t n       = last - first;
-    int numThreads = 256;
-    int numBlocks  = iceil(n, numThreads);
-    if (numBlocks == 0) { return; }
-    fillMaskedKernel<<<numBlocks, numThreads, 0, exec>>>(first, n, mask, value);
-}
-
-template void fillMasked(execution::Gpu, float*, float*, const uint8_t*, float);
-template void fillMasked(execution::Gpu, double*, double*, const uint8_t*, double);
-
 __global__ void nonFluidFlagsKernel(const uint8_t* ptype, LocalIndex n, unsigned* flags)
 {
     LocalIndex tid = blockIdx.x * blockDim.x + threadIdx.x;

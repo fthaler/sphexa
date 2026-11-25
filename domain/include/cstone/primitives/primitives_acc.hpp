@@ -33,17 +33,6 @@ void fill(execution::Cpu, It first, It last, T value)
     std::fill(first, last, value);
 }
 
-//! @brief fill @p value into [first:last) where the mask is non-zero, no-op for empty ranges
-template<class It, class MaskIt, class T>
-void fillMasked(execution::Cpu, It first, It last, MaskIt maskFirst, T value)
-{
-    if (last <= first) { return; }
-    for (; first != last; ++first, ++maskFirst)
-    {
-        if (*maskFirst != 0) { *first = value; }
-    }
-}
-
 template<class T>
 void copy_n(execution::Cpu, const T* src, std::size_t n, T* dest)
 {

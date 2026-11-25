@@ -431,26 +431,26 @@ public:
         timer.step("MomentumAndEnergy");
         pmReader.step();
 
-        //! @brief step 9: restore the full SFC layout before gravity (a full-layout routine)
-        unpartition_(domain, simData);
-        timer.step("partitionRestore");
-
-        //! @brief step 10: zero the non-fluid owned accelerations before gravity
+        //! @brief step 9: zero the non-fluid accelerations in the compacted tail, then restore the
+        //! full SFC layout before gravity (a full-layout routine)
         //!
         //! Gravity accumulates into ax/ay/az, and phase 7 wrote fluid accelerations only, so the
-        //! non-fluid owned slots hold sync/halo-exchange scratch garbage (ax is also the exchange
-        //! send buffer). Unconditional, so non-fluid accelerations are well-defined even with
-        //! g == 0 (the drift consumes them for all particles). Non-fluid halo accelerations stay
-        //! garbage — never read. Gravity itself keeps the full-buffer view (correct for mixed
-        //! populations, layout.back() == bufSize); no nFluid gating here.
-        size_t first = domain.startIndex();
-        size_t last  = domain.endIndex();
-        cstone::fillMasked(domain.exec(), cstone::rawPtr(d.ax) + first, cstone::rawPtr(d.ax) + last,
-                           cstone::rawPtr(d.ptype) + first, HydroType(0));
-        cstone::fillMasked(domain.exec(), cstone::rawPtr(d.ay) + first, cstone::rawPtr(d.ay) + last,
-                           cstone::rawPtr(d.ptype) + first, HydroType(0));
-        cstone::fillMasked(domain.exec(), cstone::rawPtr(d.az) + first, cstone::rawPtr(d.az) + last,
-                           cstone::rawPtr(d.ptype) + first, HydroType(0));
+        //! non-fluid slots hold sync/halo-exchange scratch garbage (ax is also the exchange send
+        //! buffer). Zeroing the contiguous compacted tail [nFluid:bufSize) covers every non-fluid
+        //! slot — owned (the drift in integrate step 2 consumes them for all particles) and halos
+        //! (never read) — and unpartition_ scatters the zeros back with the particles.
+        //! Unconditional, so non-fluid accelerations are well-defined even with g == 0. The tail
+        //! is dead scratch at this point: step 8 wrote [fluidFirst:fluidLast) only, and the fluid
+        //! halo exchanges use dedicated scratch, never ax (invariant (d)). Fluid halo
+        //! accelerations stay stale — never read. Gravity itself keeps the full-buffer view
+        //! (correct for mixed populations, layout.back() == bufSize); no nFluid gating there.
+        size_t bufSize = domain.nParticlesWithHalos();
+        cstone::fill(domain.exec(), cstone::rawPtr(d.ax) + nFluid, cstone::rawPtr(d.ax) + bufSize, HydroType(0));
+        cstone::fill(domain.exec(), cstone::rawPtr(d.ay) + nFluid, cstone::rawPtr(d.ay) + bufSize, HydroType(0));
+        cstone::fill(domain.exec(), cstone::rawPtr(d.az) + nFluid, cstone::rawPtr(d.az) + bufSize, HydroType(0));
+
+        unpartition_(domain, simData);
+        timer.step("partitionRestore");
 
         if (d.g != 0.0)
         {

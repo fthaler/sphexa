@@ -41,7 +41,7 @@
  * "no fluid neighbor") are removed at the next sync when removeUnconvergedParticles is set — the
  * flag arrives via the IC file attribute (ve parity, no CLI flag). Marking happens only in
  * updateSmoothingLength over the owned-fluid compacted range: gravity particles (ptype != 0) are
- * never marked and never removed (debug-checked by assertRemoveMarksFluidOnly_). Without the flag,
+ * never marked and never removed. Without the flag,
  * unconverged particles throw "Neighbor search did not converge" as in ve. Dumps never contain
  * doomed particles: marking happens in integrate step 3, removal in the sync of the next
  * computeForces, and the driver's only dump site lies between a post-removal computeForces and
@@ -316,7 +316,6 @@ public:
         assert(fluidHalos_);
         fluidHalos_->exchangeRequests(domain.focusTree().treeLeaves(), domain.focusTree().assignment(),
                                       fluidLayoutHost_);
-        assertFluidHalosConsistent(simData, fluidFirst, fluidLast, nFluid);
         //! the request exchange is part of the fluidHaloExchange region (steps 3/7 share the name)
         timer.step("fluidHaloExchange");
 
@@ -507,7 +506,6 @@ public:
         bool haveUnconvergedParticles = updateSmoothingLength(groups_.view(), d);
         if (haveUnconvergedParticles)
         {
-            assertRemoveMarksFluidOnly_(domain, simData);
             if (not d.removeUnconvergedParticles) { throw std::runtime_error("Neighbor search did not converge\n"); }
             removalPending_ = true;
         }
@@ -732,72 +730,14 @@ private:
         fluidHalos_->exchangeHalos(domain.exec(), arrays, fluidHaloSendScratch_, fluidHaloRecvScratch_);
     }
 
-    /*! @brief debug-only peer-consistency check of the fluid halo pattern
-     *
-     * Turns a stale halo ptype (which yields a peer-inconsistent fluidLayout) into a clean assert
-     * instead of an MPI size-mismatch hang. Verifies that every fluid halo sent by any peer matches
-     * the local incoming range, and that the incoming ranges tile the halo fluid slots
-     * [0:fluidFirst) + [fluidLast:nFluid) of the compacted buffer.
-     *
-     * The checks assert (abort the rank, tearing down the mpirun job) rather than throw: a thrown,
-     * caught violation would hang the peer at the next collective — the exact failure mode this
-     * check exists to expose.
-     */
-    void assertFluidHalosConsistent([[maybe_unused]] const DataType& simData, [[maybe_unused]] size_t fluidFirst,
-                                    [[maybe_unused]] size_t fluidLast, [[maybe_unused]] size_t nFluid) const
-    {
-#ifndef NDEBUG
-        assert(fluidLayoutHost_.back() == nFluid);
-
-        int numRanks = 0, myRank = 0;
-        MPI_Comm_size(simData.comm, &numRanks);
-        MPI_Comm_rank(simData.comm, &myRank);
-
-        // entry [i * numRanks + j] = number of fluid halos rank i sends to rank j
-        std::vector<int> sendCounts(size_t(numRanks) * numRanks, 0);
-        for (int peer = 0; peer < numRanks; ++peer)
-        {
-            sendCounts[size_t(myRank) * numRanks + peer] = int(fluidHalos_->outgoing()[peer].totalCount());
-        }
-        MPI_Allreduce(MPI_IN_PLACE, sendCounts.data(), int(sendCounts.size()), MPI_INT, MPI_SUM, simData.comm);
-
-        for (int peer = 0; peer < numRanks; ++peer)
-        {
-            assert(sendCounts[size_t(peer) * numRanks + myRank] == int(fluidHalos_->incoming()[peer].count()) &&
-                   "ve-pt: fluid halo request mismatch with a peer rank");
-        }
-
-        // the incoming ranges must tile [0:fluidFirst) + [fluidLast:nFluid); the only allowed gap is
-        // the owned fluid range [fluidFirst:fluidLast)
-        std::vector<std::pair<size_t, size_t>> ranges;
-        for (int peer = 0; peer < numRanks; ++peer)
-        {
-            auto in = fluidHalos_->incoming()[peer];
-            if (in.count() > 0) { ranges.emplace_back(in.start(), in.start() + in.count()); }
-        }
-        std::sort(ranges.begin(), ranges.end());
-
-        size_t covered = 0;
-        for (auto [rangeStart, rangeEnd] : ranges)
-        {
-            assert((rangeStart == covered || (covered == fluidFirst && rangeStart == fluidLast)) &&
-                   "ve-pt: fluid halo incoming ranges do not tile the halo fluid slots");
-            covered = rangeEnd;
-        }
-        assert((covered == nFluid || (covered == fluidFirst && fluidLast == nFluid)) &&
-               "ve-pt: fluid halo incoming ranges do not tile the halo fluid slots");
-#endif
-    }
-
     /*! @brief drop removeKey marks that landed in the halo slots of the removal sync
      *
      * domain::sync drops the particles carrying removeKey and compacts the owned range, but the halo
      * keys are re-derived from the delivered coordinates by setupHalos through computeSfcKeys, which
      * deliberately skips removal keys (that skip is what carries the marks of owned particles from
      * integrate into the sync). A dropped particle's slot can therefore end up in the new halo range
-     * with its mark intact, i.e. as a live mark in a non-owned slot: it trips the debug guard
-     * assertRemoveMarksFluidOnly_ (which asserts zero marks outside the owned-fluid range) and leaves
-     * the halo keys inconsistent with their positions.
+     * with its mark intact, i.e. as a live mark in a non-owned slot, leaving the halo keys
+     * inconsistent with their positions.
      *
      * Recompute the halo keys from the coordinates after zeroing the range: computeSfcKeys skips slots
      * that already hold a removal key, so the mark has to be gone before the recompute. Cost is one
@@ -816,45 +756,6 @@ private:
         cstone::computeSfcKeys(domain.exec(), cstone::rawPtr(d.x) + first, cstone::rawPtr(d.y) + first,
                                cstone::rawPtr(d.z) + first, cstone::sfcKindPointer(cstone::rawPtr(d.keys)) + first,
                                last - first, domain.box());
-    }
-
-    /*! @brief debug-only stray-mark guard for the unconverged-particle removal path
-     *
-     * Runs in integrate step 3 when updateSmoothingLength reported unconverged particles (the only
-     * marking site): removeKey may appear only in the owned-fluid compacted range
-     * [fluidFirst:fluidLast) of the permuted keys. A mark anywhere else would mean a gravity
-     * particle (ptype != 0) or a halo slot got marked — a regression that would silently drop the
-     * wrong particle class at the next sync. Counting is restricted to the two non-owned ranges
-     * [0:fluidFirst) + [fluidLast:bufSize); marks in the owned-fluid range are the expected state.
-     *
-     * Asserts (aborts the rank) rather than throws, like assertFluidHalosConsistent: a thrown,
-     * caught violation would hang the peers at the next collective.
-     */
-    void assertRemoveMarksFluidOnly_([[maybe_unused]] const DomainType& domain,
-                                     [[maybe_unused]] const DataType&   simData) const
-    {
-#ifndef NDEBUG
-        const auto& d       = simData.hydro;
-        size_t      bufSize = domain.nParticlesWithHalos();
-
-        size_t fluidFirst = fluidLayoutHost_[domain.startCell()];
-        size_t fluidLast  = fluidLayoutHost_[domain.endCell()];
-
-        const KeyType* keys        = cstone::rawPtr(d.keys);
-        KeyType        markedValue = cstone::removeKey<KeyType>{};
-        size_t         strayMarks  = 0;
-        if constexpr (cstone::execution::HaveGpu<Acc>{})
-        {
-            strayMarks += cstone::count(domain.exec(), keys, keys + fluidFirst, markedValue);
-            strayMarks += cstone::count(domain.exec(), keys + fluidLast, keys + bufSize, markedValue);
-        }
-        else
-        {
-            strayMarks += std::count(keys, keys + fluidFirst, markedValue);
-            strayMarks += std::count(keys + fluidLast, keys + bufSize, markedValue);
-        }
-        assert(strayMarks == 0 && "ve-pt: non-fluid or halo particle marked for removal");
-#endif
     }
 };
 

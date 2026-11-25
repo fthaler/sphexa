@@ -338,60 +338,45 @@ public:
 
         //! @brief step 7: SPH pipeline on the owned fluid range [fluidFirst:fluidLast) with the fluid view
         //!
-        //! The SPH kernels are gated on owned fluid (fluidFirst < fluidLast), not on nFluid:
-        //! nFluid counts halo fluid, so a rank owning zero fluid but bordering a fluid owner
-        //! (config-b rank 0) has nFluid > 0 with an empty owned range — running the pipeline
-        //! there would compute groups over an empty range and hit the clustered GPU builder's
-        //! superclusterIndex(groups.lastBody - 1) underflow (fixed in gpu_superclusternblist.cuh
-        //! to early-return on an empty group range).
+        //! The pipeline runs unconditionally, on ranks without owned fluid too (a rank owning zero
+        //! fluid can still have nFluid > 0: nFluid counts halo fluid). Every callee accepts the
+        //! empty range / zero group count: computeGroups over [fluidFirst:fluidLast) with
+        //! fluidFirst == fluidLast realizes the well-defined empty state itself (CPU: a single empty
+        //! group; GPU: numGroups = 0 with firstBody == lastBody), which also keeps integrate's
+        //! unconditional updateSmoothingLength(groups_.view()) well-defined; the empty groups make
+        //! findNeighborsSfc build an empty neighborhood (the clustered GPU builder early-returns on
+        //! groups.firstBody == groups.lastBody regardless of totalBodies), on which the subsequent
+        //! Ij loops and the EOS kernels are no-ops. computeMomentumEnergy on the empty path resets
+        //! minDtCourant to +inf, the identity of integrate's global min-reduce.
         //!
-        //! The fluid halo exchanges, timer steps and PM reads between the kernels are NOT gated:
-        //! haloexchange tags each message with a per-rank epoch counter incremented on every
-        //! exchangeHalos call (halos.hpp:94/108), so a rank skipping an exchange would desync its
-        //! tags against peers and hang the next nonempty exchange; and Timer::writeTimings /
+        //! The exchanges, timer steps and PM reads between the kernels share the same skeleton on
+        //! every rank: haloexchange tags each message with a per-rank epoch counter incremented on
+        //! every exchangeHalos call (halos.hpp:94/108), so a rank skipping an exchange would desync
+        //! its tags against peers and hang the next nonempty exchange; and Timer::writeTimings /
         //! PmReader::writeTimings dump per-rank sample vectors through H5PartWriterSeq, whose
-        //! MPI_Gather uses the root's count and whose file format assumes one global step grid,
-        //! so a rank emitting fewer steps truncates the final metrics gather with "MPI_Gather:
+        //! MPI_Gather uses the root's count and whose file format assumes one global step grid, so
+        //! a rank emitting fewer steps truncates the final metrics gather with "MPI_Gather:
         //! message truncated" (hit by the config-b 2-rank run, 2026-11-11). A zero-owned-fluid
         //! rank receives real halo fluid (its incoming ranges cover the interface) but sends
         //! nothing (no peer requests fluid from a rank that owns none) and never reads the
         //! incoming data (no owned fluid consumes halo inputs).
-        const bool haveFluidParticles = fluidFirst < fluidLast;
-
-        if (haveFluidParticles)
-        {
-            computeGroups(fluidFirst, fluidLast, d, domain.box(), groups_);
-        }
-        else
-        {
-            //! groups_ must be left in a well-defined empty state: integrate's h update consumes
-            //! groups_.view() unconditionally; a stale (previous iteration) or never-built groups_
-            //! would feed indeterminate group ranges into updateSmoothingLength (GroupData members
-            //! are uninitialized PODs). numGroups = 0 makes the GPU h-update launcher a no-op
-            //! (numBlocks == 0 early return in updateSmoothingLengthGpu) and, with
-            //! firstBody == lastBody == 0, the CPU path an empty loop.
-            groups_.firstBody  = 0;
-            groups_.lastBody   = 0;
-            groups_.numGroups  = 0;
-            groups_.groupStart = nullptr;
-            groups_.groupEnd   = nullptr;
-        }
+        computeGroups(fluidFirst, fluidLast, d, domain.box(), groups_);
         timer.step("computeGroups");
 
-        if (haveFluidParticles) { updateSmoothingLengthIterative(groups_.view(), d, domain.box()); }
+        updateSmoothingLengthIterative(groups_.view(), d, domain.box());
         timer.step("updateSmoothingLengthIterative");
 
-        if (haveFluidParticles) { findNeighborsSfc(groups_.view(), d, domain.box(), false, nFluid); }
+        findNeighborsSfc(groups_.view(), d, domain.box(), false, nFluid);
         timer.step("FindNeighbors");
         pmReader.step();
 
-        if (haveFluidParticles) { computeXMass(d, domain.box()); }
+        computeXMass(d, domain.box());
         timer.step("XMass");
 
         exchangeFluidHalos_(domain, std::tie(get<"xm">(d)));
         timer.step("fluidHaloExchange");
 
-        if (haveFluidParticles) { computeVe(d, domain.box()); }
+        computeVe(d, domain.box());
         timer.step("Generalized Volume Elements");
         exchangeFluidHalos_(domain, get<"vx", "vy", "vz", "kx">(d));
         timer.step("fluidHaloExchange");
@@ -402,7 +387,7 @@ public:
         //! without consuming them would strand them released (acquireOne throws on non-unused,
         //! releaseOne throws on non-dependent). Nothing reads ay/az between the rotation legs (pure
         //! buffer donation; the IAD input tuple has no ay/az). Otherwise run both pairs as ve does.
-        //! Unconditional across the fluid gate: the donation is what gives divv a full-length
+        //! Unconditional: the donation is what gives divv a full-length
         //! buffer for the third exchange below — while unused, divv is zero-length and would fail
         //! exchangeFluidHalos_'s buffer-size check.
         if (!iadTrioRequested_)
@@ -411,25 +396,22 @@ public:
             acquire(d, "divv", "gradh");
         }
 
-        if (haveFluidParticles)
-        {
-            //! @brief the IAD kernel selects the curlv branch whenever the curlv buffer is full-length:
-            //! assert the gating survives the compaction (curlv is permanently allocated when requested)
-            assert(!iadTrioRequested_ || get<"curlv">(d).size() == get<"x">(d).size());
-            computeIadDivvCurlvGradh(d, domain.box());
-        }
+        //! @brief the IAD kernel selects the curlv branch whenever the curlv buffer is full-length:
+        //! assert the gating survives the compaction (curlv is permanently allocated when requested)
+        assert(!iadTrioRequested_ || get<"curlv">(d).size() == get<"x">(d).size());
+        computeIadDivvCurlvGradh(d, domain.box());
         //! empty fluid range -> +inf before any divv access (M2b guard, ts_global.hpp): divv would
         //! only be read in [fluidFirst:fluidLast), so the donated/stale contents are never touched
         d.minDtRho = rhoTimestep(fluidFirst, fluidLast, d);
         timer.step("IadVelocityDivCurlGradh");
 
-        if (haveFluidParticles) { computeEOS(fluidFirst, fluidLast, d); }
+        computeEOS(fluidFirst, fluidLast, d);
         timer.step("EquationOfState");
 
         exchangeFluidHalos_(domain, get<"c11", "c12", "c13", "c22", "c23", "c33", "divv", "c">(d));
         timer.step("fluidHaloExchange");
 
-        if (haveFluidParticles) { computeAVswitches(d, domain.box()); }
+        computeAVswitches(d, domain.box());
         timer.step("AVswitches");
 
         if (avClean)
@@ -445,7 +427,7 @@ public:
             acquire(d, "ay", "az");
         }
 
-        if (haveFluidParticles) { computeMomentumEnergy<avClean>(groups_.view(), nullptr, d, domain.box()); }
+        computeMomentumEnergy<avClean>(groups_.view(), nullptr, d, domain.box());
         timer.step("MomentumAndEnergy");
         pmReader.step();
 
